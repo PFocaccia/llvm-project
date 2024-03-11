@@ -28,8 +28,8 @@ using namespace clang::driver;
 using namespace clang::driver::tools;
 using namespace clang::driver::toolchains;
 
-static Multilib makeMultilib(StringRef commonSuffix) {
-  return Multilib(commonSuffix, commonSuffix, commonSuffix);
+static Multilib makeMultilib(StringRef commonSuffix, int priority = 0) {
+  return Multilib(commonSuffix, commonSuffix, commonSuffix, priority);
 }
 
 static bool findRISCVMultilibs(const Driver &D,
@@ -67,25 +67,46 @@ static bool findRISCVMultilibs(const Driver &D,
     Multilib Iac = makeMultilib("/rv32iac/ilp32")
                        .flag("+march=rv32iac")
                        .flag("+mabi=ilp32");
-    Multilib Imafc = makeMultilib("/rv32imafc/ilp32f")
+    Multilib Imaf  = makeMultilib("/rv32imaf/ilp32f")
+                         .flag("+march=rv32imaf")
+                         .flag("+mabi=ilp32f");
+    Multilib Imafc = makeMultilib("/rv32imafc/ilp32f", 1)
                          .flag("+march=rv32imafc")
                          .flag("+mabi=ilp32f");
+    Multilib Imafd = makeMultilib("/rv32imafd/ilp32d", 2)
+                         .flag("+march=rv32imafd")
+                         .flag("+mabi=ilp32d");
+    Multilib Imcxpulpv2  = makeMultilib("/rv32imcxpulpv2/ilp32", 1)
+                              .flag("+march=rv32imcxpulpv2")
+                              .flag("+mabi=ilp32");
+    Multilib Imfcxpulpv2 = makeMultilib("/rv32imfcxpulpv2/ilp32f", 2)
+                               .flag("+march=rv32imfcxpulpv2")
+                               .flag("+mabi=ilp32f");
 
     // Multilib reuse
     bool UseI = (Arch == "rv32i") || (Arch == "rv32ic");    // ic => i
-    bool UseIm = (Arch == "rv32im") || (Arch == "rv32imc"); // imc => im
+    bool UseIm = (Arch == "rv32im") || (Arch == "rv32ima") || (Arch == "rv32imc"); // ima,imc => im
     bool UseImafc = (Arch == "rv32imafc") || (Arch == "rv32imafdc") ||
                     (Arch == "rv32gc"); // imafdc,gc => imafc
+    std::string prefix = "rv32imafd";
+    bool UseImafd  = (Arch.substr(0, prefix.size()) == prefix);
+    prefix = "rv32imaf";
+    bool UseImaf  = !UseImafc && !UseImafd && (Arch.substr(0, prefix.size()) == prefix);
 
     addMultilibFlag(UseI, "march=rv32i", Flags);
     addMultilibFlag(UseIm, "march=rv32im", Flags);
     addMultilibFlag((Arch == "rv32iac"), "march=rv32iac", Flags);
     addMultilibFlag((Arch == "rv32imac"), "march=rv32imac", Flags);
     addMultilibFlag(UseImafc, "march=rv32imafc", Flags);
+    addMultilibFlag(UseImaf, "march=rv32imaf", Flags);
+    addMultilibFlag(UseImafd, "march=rv32imafd", Flags);
+    addMultilibFlag((Arch == "rv32imcxpulpv2"), "march=rv32imcxpulpv2", Flags);
+    addMultilibFlag((Arch == "rv32imfcxpulpv2"), "march=rv32imfcxpulpv2", Flags);
     addMultilibFlag(Abi == "ilp32", "mabi=ilp32", Flags);
     addMultilibFlag(Abi == "ilp32f", "mabi=ilp32f", Flags);
+    addMultilibFlag(Abi == "ilp32d", "mabi=ilp32d", Flags);
 
-    Result.Multilibs = MultilibSet().Either(I, Im, Iac, Imac, Imafc);
+    Result.Multilibs = MultilibSet().Either({I, Im, Iac, Imac, Imaf, Imafc, Imafd, Imcxpulpv2, Imfcxpulpv2});
     return Result.Multilibs.select(Flags, Result.SelectedMultilib);
   }
   return false;
