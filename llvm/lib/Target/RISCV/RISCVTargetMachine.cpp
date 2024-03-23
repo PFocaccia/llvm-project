@@ -49,6 +49,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTarget() {
   initializeSNITCHFrepLoopsPass(*PR);
   initializeRISCVExpandSDMAPass(*PR);
   initializeRISCVExpandPseudoPass(*PR);
+  initializePULPExpandPseudoPass(*PR);
   initializeRISCVInsertVSETVLIPass(*PR);
   initializePULPHardwareLoopsPass(*PR);
 }
@@ -215,6 +216,7 @@ void RISCVPassConfig::addMachineSSAOptimization() {
 }
 
 void RISCVPassConfig::addPreRegAlloc() {
+  addPass(createPULPExpandPseudoPass());
   addPass(createRISCVExpandSDMAPass());
   addPass(createRISCVExpandSSRPass());
   addPass(createSNITCHFrepLoopsPass());

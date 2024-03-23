@@ -46,6 +46,7 @@ add_llvm_target(RISCVCodeGen
   RISCVTargetObjectFile.cpp
   RISCVTargetTransformInfo.cpp
   Snitch/SNITCHFrepLoops.cpp
+  PULPExpandPseudoInsts.cpp
 
   LINK_COMPONENTS
   Analysis

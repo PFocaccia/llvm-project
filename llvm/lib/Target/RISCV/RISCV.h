@@ -58,6 +58,9 @@ void initializeRISCVInsertVSETVLIPass(PassRegistry &);
 FunctionPass *createRISCVRedundantCopyEliminationPass();
 void initializeRISCVRedundantCopyEliminationPass(PassRegistry &);
 
+FunctionPass *createPULPExpandPseudoPass();
+void initializePULPExpandPseudoPass(PassRegistry &);
+
 FunctionPass *createPULPHardwareLoops();
 void initializePULPHardwareLoopsPass(PassRegistry &);
 
