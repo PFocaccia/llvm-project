@@ -495,3 +495,7 @@
 // RUN: %clang -target riscv32-unknown-elf -march=rv32izk1p0 -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-ZK %s
 // RV32-ZK: "-target-feature" "+zk"
+
+// RUN: %clang -target riscv32-unknown-elf -march=rv32imaf -mno-fdiv -### %s \
+// RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-NOFDIV %s
+// RV32-NOFDIV: "-target-feature" "+nofdiv"

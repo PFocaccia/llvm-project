@@ -130,6 +130,7 @@ private:
   bool HasExtXfexpauxvecquarter = false;
   bool HasExtXfexpauxvecaltquarter = false;
   // -->
+  bool HasNoFdiv = false;
   bool HasRV64 = false;
   bool IsRV32E = false;
   bool EnableLinkerRelax = false;
@@ -258,6 +259,7 @@ public:
   bool hasExtXfexpauxvecquarter() const { return HasExtXfexpauxvecquarter; }
   bool hasExtXfexpauxvecaltquarter() const { return HasExtXfexpauxvecaltquarter; }
   // -->
+  bool hasNoFdiv() const { return HasNoFdiv; }
   bool is64Bit() const { return HasRV64; }
   bool isRV32E() const { return IsRV32E; }
   bool enableLinkerRelax() const { return EnableLinkerRelax; }
