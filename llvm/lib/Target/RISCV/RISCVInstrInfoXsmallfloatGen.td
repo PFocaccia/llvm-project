@@ -227,6 +227,16 @@ def FCVT_B_LU : RVInstRFrm<0b1101011, RISCVOpcode<"FCVT_B_LU", 0b1010011>,
   }
 def      : InstAlias<"fcvt.b.lu $rd, $rs1", (FCVT_B_LU FPR16:$rd, GPR:$rs1, 0b111)>;
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
+def VFCVT_D_S : RVInstRVf<0b10, 0b01100, 0b0, VFMT_FP64, RISCVOpcode<"VFCVT_D_S", 0b0110011>,
+	     (outs FPR64:$rd), (ins FPR32:$rs1), "vfcvt.d.s", "$rd, $rs1">, Sched<[]> {
+    let rs2 = 0b00100;
+  }
+let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
+def VFCVTU_D_S : RVInstRVf<0b10, 0b01100, 0b1, VFMT_FP64, RISCVOpcode<"VFCVTU_D_S", 0b0110011>,
+	     (outs FPR64:$rd), (ins GPR:$rs1), "vfcvtu.d.s", "$rd, $rs1">, Sched<[]> {
+    let rs2 = 0b00100;
+  }
+let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 def FCVT_S_B : RVInstR<0b0100000, 0b000, RISCVOpcode<"FCVT_S_B", 0b1010011>,
              (outs FPR32:$rd), (ins FPR16:$rs1), "fcvt.s.b", "$rd, $rs1">, Sched<[]> {
     let rs2 = 0b00011;
@@ -1133,6 +1143,8 @@ def : InstAlias<"vfcpka.ab.d $rd, $rs1, $rs2",   (VFCPKA_B_D FPR16:$rd, FPR64:$r
 def : InstAlias<"vfcpkb.ab.d $rd, $rs1, $rs2",   (VFCPKB_B_D FPR16:$rd, FPR64:$rs1, FPR64:$rs2), 0>;
 def : InstAlias<"vfcpkc.ab.d $rd, $rs1, $rs2",   (VFCPKC_B_D FPR16:$rd, FPR64:$rs1, FPR64:$rs2), 0>;
 def : InstAlias<"vfcpkd.ab.d $rd, $rs1, $rs2",   (VFCPKD_B_D FPR16:$rd, FPR64:$rs1, FPR64:$rs2), 0>;
+def : InstAlias<"vfcvt.d.s $rd, $rs1",   (VFCVT_D_S FPR64:$rd, FPR32:$rs1), 0>;
+def : InstAlias<"vfcvtu.d.s $rd, $rs1",   (VFCVTU_D_S FPR64:$rd, GPR:$rs1), 0>;
 def : InstAlias<"vfcvt.s.ab $rd, $rs1",   (VFCVT_S_B FPR32:$rd, FPR16:$rs1), 0>;
 def : InstAlias<"vfcvtu.s.ab $rd, $rs1",   (VFCVTU_S_B FPR32:$rd, FPR16:$rs1), 0>;
 def : InstAlias<"vfcvt.ab.s $rd, $rs1",   (VFCVT_B_S FPR16:$rd, FPR32:$rs1), 0>;

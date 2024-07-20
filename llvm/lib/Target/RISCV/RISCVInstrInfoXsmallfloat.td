@@ -15,6 +15,7 @@
 class RISCVVFFormat<bits<2> val> {
   bits<2> Value = val;
 }
+def VFMT_FP64     : RISCVVFFormat<0b01>;
 def VFMT_FP32     : RISCVVFFormat<0b00>;
 def VFMT_FP16     : RISCVVFFormat<0b10>;
 def VFMT_FP8      : RISCVVFFormat<0b11>;
