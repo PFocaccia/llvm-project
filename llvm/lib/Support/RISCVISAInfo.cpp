@@ -100,6 +100,7 @@ static const RISCVSupportedExtension SupportedExtensions[] = {
     {"xdma", RISCVExtensionVersion{0, 1}},
     {"xfrep", RISCVExtensionVersion{0, 1}},
     {"xmempool", RISCVExtensionVersion{0, 1}},
+    {"xcopift", RISCVExtensionVersion{0, 1}},
     // Smallfloat extensions
     {"xfalthalf", RISCVExtensionVersion{0, 1}},
     {"xfquarter", RISCVExtensionVersion{0, 1}},

@@ -106,6 +106,7 @@ private:
   bool HasExtXfrep = false;
   bool HasExtXdma = false;
   bool HasExtXssr = false;
+  bool HasExtXcopift = false;
   bool HasExtXmempool = false;
   // <-- Start of smallfloat extensions
   bool HasExtXfalthalf = false;
@@ -223,6 +224,7 @@ public:
   bool hasExtXfrep() const { return HasExtXfrep; }
   bool hasExtXdma() const { return HasExtXdma; }
   bool hasExtXssr() const { return HasExtXssr; }
+  bool hasExtXcopift() const { return HasExtXcopift; }
   bool hasExtXmempool() const { return HasExtXmempool; }
   bool hasPULPExtV2() const { return HasPULPExtV2; }
   bool hasExtXsmallfloat() const {

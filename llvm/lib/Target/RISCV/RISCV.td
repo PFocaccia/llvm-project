@@ -460,6 +460,13 @@ def HasExtXssr : Predicate<"Subtarget->hasExtXssr()">,
                            AssemblerPredicate<(all_of FeatureExtXssr),
                            "'Xssr' (Stream Semantic Registers)">;
 
+def FeatureExtXcopift
+    : SubtargetFeature<"xcopift", "HasExtXcopift", "true",
+                       "'Xcopift' (Cooperative Parallel Integer and Floating-Point Threads)">;
+def HasExtXcopift : Predicate<"Subtarget->hasExtXcopift()">,
+                              AssemblerPredicate<(all_of FeatureExtXcopift),
+                              "'Xcopift' (Cooperative Parallel Integer and Floating-Point Threads)">;
+
 def FeatureExtXmempool
     : SubtargetFeature<"xmempool", "HasExtXmempool", "true",
                        "'Xmempool' (MemPool System)">;
@@ -591,6 +598,7 @@ def : ProcessorModel<"snitch", SnitchModel, [FeatureStdExtM,
                                              FeatureExtXfrep,
                                              FeatureExtXdma,
                                              FeatureExtXssr,
+                                             FeatureExtXcopift,
                                              FeatureExtXfalthalf,
                                              FeatureExtXfquarter,
                                              FeatureExtXfaltquarter,
