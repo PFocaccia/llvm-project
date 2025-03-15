@@ -1,3 +1,9 @@
+| 🧰 Toolchain | 🎯 Target extensions                               | 💻 Target cores    | 🔗 Link                                                                                             |
+|--------------|----------------------------------------------------|-------------------|-----------------------------------------------------------------------------------------------------|
+| **LLVM**     | **`xpulpv2`, `xssr`, `xfrep`, `xdma`, `xmempool`** | **RI5CY, Snitch** | **this repo**                                                                                       |
+| GCC7         | `xpulpv2`                                          | RI5CY             | [pulp-platform/pulp-riscv-gnu-toolchain](https://github.com/pulp-platform/pulp-riscv-gnu-toolchain) |
+| GCC11        | `xpulpv3`                                          | CV32E40P          | [pulp-platform/riscv-gnu-toolchain](https://github.com/pulp-platform/riscv-gnu-toolchain)           |
+
 # LLVM for PULP Platform Projects
 
 LLVM 12 with extensions for processors and computer systems of the [PULP platform](https://pulp-platform.org).  These include:
