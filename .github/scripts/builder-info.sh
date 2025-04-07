@@ -9,7 +9,7 @@ OLD_PWD=${PWD}
 
 # Print header
 echo "Host: `hostname`" > $OUTPUT
-echo "Dace: `date`" >> $OUTPUT
+echo "Date: `date`" >> $OUTPUT
 echo "Kernel: `cat /proc/version`" >> $OUTPUT
 echo "gcc: `gcc --version | head -n1`" >> $OUTPUT
 echo "ld: `ld --version | head -n1`" >> $OUTPUT

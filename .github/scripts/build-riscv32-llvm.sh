@@ -43,6 +43,11 @@ if [ "x${PARALLEL_JOBS}" == "x" ]; then
   PARALLEL_JOBS=$(nproc)
 fi
 
+# Clone newlib
+rm -rf ${NEWLIBSRC}
+git clone --depth 1 -b newlib-4.4.0 https://sourceware.org/git/newlib-cygwin.git ${NEWLIBSRC}
+ls -al
+
 ##############################
 # Clang/LLVM
 ##############################
@@ -73,7 +78,7 @@ PATH=${INSTALLPREFIX}/bin:${PATH}
 # newlib
 ##############################
 
-# Newlib for rv32
+# Build newlib for rv32
 mkdir -p ${BUILDPREFIX}/newlib32
 cd ${BUILDPREFIX}/newlib32
 # CFLAGS_FOR_TARGET="-DPREFER_SIZE_OVER_SPEED=1 -Os" \
@@ -84,7 +89,7 @@ ${NEWLIBSRC}/configure                                 \
     AS_FOR_TARGET=${INSTALLPREFIX}/bin/llvm-as         \
     LD_FOR_TARGET=${INSTALLPREFIX}/bin/llvm-ld         \
     RANLIB_FOR_TARGET=${INSTALLPREFIX}/bin/llvm-ranlib \
-    CC_FOR_TARGET="${INSTALLPREFIX}/bin/clang -march=rv32imafd" \
+    CC_FOR_TARGET="${INSTALLPREFIX}/bin/clang --target=riscv32 -march=rv32imafd -mno-fdiv" \
     ${NEWLIB_EXTRA_OPTS}                             
     # --enable-multilib                              \
     # --disable-newlib-fvwrite-in-streamio           \
@@ -134,15 +139,3 @@ cmake -G"Unix Makefiles"                                                     \
     ../../llvm-project/compiler-rt
 make -j${PARALLEL_JOBS}
 make install
-
-##############################
-# Symlinks
-##############################
-
-# Add symlinks to LLVM tools
-cd ${INSTALLPREFIX}/bin
-for TRIPLE in riscv32-unknown-elf; do
-  for TOOL in clang clang++ cc c++; do
-    ln -sv clang ${TRIPLE}-${TOOL}
-  done
-done

@@ -7,6 +7,9 @@ name: release
 on:
   release:
     types: [created]
+  push:
+      branches:
+        - snitch
 
 jobs:
 
@@ -15,9 +18,9 @@ jobs:
     strategy:
       matrix:
         os:
-        - ubuntu2004
-        - centos7
-    runs-on: ubuntu-20.04
+        - ubuntu2204
+        - almalinux8
+    runs-on: ubuntu-22.04
     env:
       BUGURL: https://github.com/pulp-platform/llvm-project/issues
       BUILDNO: ${{ github.run_number }}
@@ -25,25 +28,15 @@ jobs:
       ########################################
       ## Checkout
       ########################################
-      
-      ## This
-      -
-        name: Checkout LLVM
-        uses: actions/checkout@v2
+      - name: Checkout LLVM
+        uses: actions/checkout@v3
         with:
           path: llvm-project
-      
-      ## NEWLIB
-      -
-        name: Checkout newlib
-        run: |
-          git clone --depth 1 -b newlib-3.3.0 https://sourceware.org/git/newlib-cygwin.git newlib
       
       ########################################
       ## Build docker container
       ########################################
-      -
-        name: Prepare Docker
+      - name: Prepare Docker
         uses: docker/build-push-action@v2
         with:
           push: false
@@ -55,10 +48,9 @@ jobs:
       ########################################
       ## Build Info
       ########################################
-      -
-        name: Build Info
+      - name: Build Info
         run: |
-          PKGVERS=riscv32-pulp-llvm-${{ matrix.os }}-${GITHUB_REF#refs/*/}
+          PKGVERS=riscv32-snitch-llvm-${{ matrix.os }}-${GITHUB_REF#refs/*/}
           echo "PKGVERS=${PKGVERS}" >> $GITHUB_ENV
           echo "BUGURL=${BUGURL}"
           echo "PKGVERS=${PKGVERS}"
@@ -68,8 +60,7 @@ jobs:
       ########################################
       ## Build
       ########################################
-      -
-        name: Build
+      - name: Build
         run: |
           docker run -v $PWD:/home/builder -w/home/builder \
             -e BUGURL=${BUGURL} \
@@ -81,8 +72,7 @@ jobs:
       ########################################
       ## Package
       ########################################
-      -
-        name: Package
+      - name: Package
         run: |
           echo "PKGVERS: ${PKGVERS}"
           tar -czf ${PKGVERS}.tar.gz --transform s/^install/${PKGVERS}/ install
@@ -99,6 +89,8 @@ jobs:
         shell: bash
 
       - name: Upload Release Asset
+        if: >
+          github.event_name == 'release'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
