@@ -1,4 +1,4 @@
-//===-- RISCVInstrInfoXfrep.td - RISC-V 'Xfrep' instructions ---*- tablegen -*-===//
+//===-- RISCVInstrInfoXssr.td - RISC-V 'Xssr' instructions ---*- tablegen -*-===//
 //
 // Copyright 2021 ETH Zurich, University of Bologna.
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
