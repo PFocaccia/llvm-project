@@ -21,3 +21,5 @@ def : SysReg<"barrier", 0x7C2>;
 def : SysReg<"sc", 0x7C3>;
 def : SysReg<"user_low", 0x7C4>;
 def : SysReg<"user_high", 0x7C5>;
+def : SysReg<"copift", 0x7C6>;
+def : SysReg<"dump", 0x7C7>;
