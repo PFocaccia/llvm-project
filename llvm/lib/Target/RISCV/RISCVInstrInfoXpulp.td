@@ -402,13 +402,13 @@ multiclass Pulp_Load<bits<7> funct7, bits<3> funct3, string opcodestr> {
 // Instructions
 //===----------------------------------------------------------------------===//
 
-let Predicates = [IsRV32, HasPULPExtV2], DecoderNamespace = "RV32Xpulp" in {
-
+let Predicates = [IsRV32, HasPULPExtElw], DecoderNamespace = "RV32Xpulpelw" in {
 let hasSideEffects = 1, mayStore = 1 in
   def PULP_ELW : Load_ri<0b110, "p.elw">, Sched<[WriteLDW, ReadMemBase]>;
+} // Predicates = [IsRV32, HasPULPExtElw], DecoderNamespace = "RV32Xpulpelw"
 
 // Hardware loops
-
+let Predicates = [IsRV32, HasPULPExtHwloop], DecoderNamespace = "RV32Xpulphwloop" in {
 def LOOP0setup : Instruction, Sched<[ReadIALU, WriteCSR]> {
 
     bits<32> Inst;
@@ -733,7 +733,9 @@ def LOOP1count : Instruction, Sched<[ReadIALU, WriteCSR]> {
 
     let AsmString = "lp.count\tx1, $uimmS";
 }
+} // Predicates = [IsRV32, HasPULPExtHwloop], DecoderNamespace = "RV32Xpulphwloop"
 
+let Predicates = [IsRV32, HasPULPExtBitop], DecoderNamespace = "RV32Xpulpbitop" in {
 // Bit manipulation operations
 def P_EXTRACT :   Pulp_ALU_rii   <0b11, 0b000, "p.extract">;
 def P_EXTRACTU :  Pulp_ALU_rii   <0b11, 0b001, "p.extractu">;
@@ -753,24 +755,38 @@ def P_FL1 :       Pulp_ALU_r <0b0001000, 0b001, OPC_OP, "p.fl1">;
 def P_CLB :       Pulp_ALU_r <0b0001000, 0b010, OPC_OP, "p.clb">;
 def P_CNT :       Pulp_ALU_r <0b0001000, 0b011, OPC_OP, "p.cnt">;
 
-// General ALU operations
-def P_ABS :    Pulp_ALU_r <0b0000010, 0b000, OPC_OP, "p.abs">;
-def P_SLET :   Pulp_ALU_rr<0b0000010, 0b010, OPC_OP, "p.slet">;
-def P_SLETU :  Pulp_ALU_rr<0b0000010, 0b011, OPC_OP, "p.sletu">;
-def P_MIN :    Pulp_ALU_rr<0b0000010, 0b100, OPC_OP, "p.min">;
-def P_MINU :   Pulp_ALU_rr<0b0000010, 0b101, OPC_OP, "p.minu">;
-def P_MAX :    Pulp_ALU_rr<0b0000010, 0b110, OPC_OP, "p.max">;
-def P_MAXU :   Pulp_ALU_rr<0b0000010, 0b111, OPC_OP, "p.maxu">;
 def P_EXTHS :  Pulp_ALU_r <0b0001000, 0b100, OPC_OP, "p.exths">;
 def P_EXTHZ :  Pulp_ALU_r <0b0001000, 0b101, OPC_OP, "p.exthz">;
 def P_EXTBS :  Pulp_ALU_r <0b0001000, 0b110, OPC_OP, "p.extbs">;
 def P_EXTBZ :  Pulp_ALU_r <0b0001000, 0b111, OPC_OP, "p.extbz">;
+} // Predicates = [IsRV32, HasPULPExtBitop], DecoderNamespace = "RV32Xpulpbitop"
 
+
+// General ALU operations
+let Predicates = [IsRV32, HasPULPExtAbs], DecoderNamespace = "RV32Xpulpabs" in {
+def P_ABS :    Pulp_ALU_r <0b0000010, 0b000, OPC_OP, "p.abs">;
+} // Predicates = [IsRV32, HasPULPExtAbs], DecoderNamespace = "RV32Xpulpabs"
+
+let Predicates = [IsRV32, HasPULPExtSlet], DecoderNamespace = "RV32Xpulpslet" in {
+def P_SLET :   Pulp_ALU_rr<0b0000010, 0b010, OPC_OP, "p.slet">;
+def P_SLETU :  Pulp_ALU_rr<0b0000010, 0b011, OPC_OP, "p.sletu">;
+} // Predicates = [IsRV32, HasPULPExtSlet], DecoderNamespace = "RV32Xpulpslet"
+
+let Predicates = [IsRV32, HasPULPExtMinmax], DecoderNamespace = "RV32Xpulpminmax" in {
+def P_MIN :    Pulp_ALU_rr<0b0000010, 0b100, OPC_OP, "p.min">;
+def P_MINU :   Pulp_ALU_rr<0b0000010, 0b101, OPC_OP, "p.minu">;
+def P_MAX :    Pulp_ALU_rr<0b0000010, 0b110, OPC_OP, "p.max">;
+def P_MAXU :   Pulp_ALU_rr<0b0000010, 0b111, OPC_OP, "p.maxu">;
+} // Predicates = [IsRV32, HasPULPExtMinmax], DecoderNamespace = "RV32Xpulpminmax"
+
+let Predicates = [IsRV32, HasPULPExtClip], DecoderNamespace = "RV32Xpulpclip" in {
 def P_CLIP :   Pulp_ALU_ri<0b0001010, 0b001, "p.clip">;
 def P_CLIPU :  Pulp_ALU_ri<0b0001010, 0b010, "p.clipu">;
 def P_CLIPR :  Pulp_ALU_rr<0b0001010, 0b101, OPC_OP, "p.clipr">;
 def P_CLIPUR : Pulp_ALU_rr<0b0001010, 0b110, OPC_OP, "p.clipur">;
+} // Predicates = [IsRV32, HasPULPExtClip], DecoderNamespace = "RV32Xpulpclip"
 
+let Predicates = [IsRV32, HasPULPExtAddsubrn], DecoderNamespace = "RV32Xpulpaddsubrn" in {
 def P_ADDN :    Pulp_ALU_rri<0b00, 0b010, OPC_PULP_OP, "p.addn">;
 def P_ADDUN :   Pulp_ALU_rri<0b10, 0b010, OPC_PULP_OP, "p.addun">;
 def P_ADDRN :   Pulp_ALU_rri<0b00, 0b110, OPC_PULP_OP, "p.addrn">;
@@ -787,15 +803,21 @@ def P_SUBNR :   Pulp_ALU_rr_wb<0b0100000, 0b011, OPC_PULP_OP, "p.subnr">;
 def P_SUBUNR :  Pulp_ALU_rr_wb<0b1100000, 0b011, OPC_PULP_OP, "p.subunr">;
 def P_SUBRNR :  Pulp_ALU_rr_wb<0b0100000, 0b111, OPC_PULP_OP, "p.subrnr">;
 def P_SUBURNR : Pulp_ALU_rr_wb<0b1100000, 0b111, OPC_PULP_OP, "p.suburnr">;
+} // Predicates = [IsRV32, HasPULPExtAddsubrn], DecoderNamespace = "RV32Xpulpaddsubrn"
 
+let Predicates = [IsRV32, HasPULPExtBr], DecoderNamespace = "RV32Xpulpbr" in {
 // Instructions: immediate branches
 def P_BEQIMM : Pulp_Immediate_Branch<0b010, "p.beqimm">;
 def P_BNEIMM : Pulp_Immediate_Branch<0b011, "p.bneimm">;
+} // Predicates = [IsRV32, HasPULPExtBr], DecoderNamespace = "RV32Xpulpbr"
 
+let Predicates = [IsRV32, HasPULPExtMacsi], DecoderNamespace = "RV32Xpulpmacsi" in {
 // Instructions: MAC operations
 def P_MAC :      Pulp_ALU_rr_wb<0b0100001, 0b000, OPC_OP, "p.mac">;
 def P_MSU :      Pulp_ALU_rr_wb<0b0100001, 0b001, OPC_OP, "p.msu">;
+} // Predicates = [IsRV32, HasPULPExtMacsi], DecoderNamespace = "RV32Xpulpmacsi"
 
+let Predicates = [IsRV32, HasPULPExtMulrnhi], DecoderNamespace = "RV32Xpulpmulrnhi" in {
 def P_MULS :     Pulp_ALU_rr   <0b1000000, 0b000, OPC_PULP_OP, "p.muls">;
 def P_MULHHS :   Pulp_ALU_rr   <0b1100000, 0b000, OPC_PULP_OP, "p.mulhhs">;
 def P_MULSN :    Pulp_ALU_rri       <0b10, 0b000, OPC_PULP_OP, "p.mulsn">;
@@ -808,19 +830,27 @@ def P_MULUN :    Pulp_ALU_rri       <0b00, 0b000, OPC_PULP_OP, "p.mulun">;
 def P_MULHHUN :  Pulp_ALU_rri       <0b01, 0b000, OPC_PULP_OP, "p.mulhhun">;
 def P_MULURN :   Pulp_ALU_rri       <0b00, 0b100, OPC_PULP_OP, "p.mulurn">;
 def P_MULHHURN : Pulp_ALU_rri       <0b01, 0b100, OPC_PULP_OP, "p.mulhhurn">;
-def P_MACS :     Pulp_ALU_rr_wb<0b1000000, 0b001, OPC_PULP_OP, "p.macs">;
-def P_MACHHS :   Pulp_ALU_rr_wb<0b1100000, 0b001, OPC_PULP_OP, "p.machhs">;
+} // Predicates = [IsRV32, HasPULPExtMulrnhi], DecoderNamespace = "RV32Xpulpmulrnhi"
+
+let Predicates = [IsRV32, HasPULPExtMacrnhi], DecoderNamespace = "RV32Xpulpmacrnhi" in {
 def P_MACSN :    Pulp_ALU_rri_wb    <0b10, 0b001, OPC_PULP_OP, "p.macsn">;
 def P_MACHHSN :  Pulp_ALU_rri_wb    <0b11, 0b001, OPC_PULP_OP, "p.machhsn">;
 def P_MACSRN :   Pulp_ALU_rri_wb    <0b10, 0b101, OPC_PULP_OP, "p.macsrn">;
 def P_MACHHSRN : Pulp_ALU_rri_wb    <0b11, 0b101, OPC_PULP_OP, "p.machhsrn">;
-def P_MACU :     Pulp_ALU_rr_wb<0b0000000, 0b001, OPC_PULP_OP, "p.macu">;
-def P_MACHHU :   Pulp_ALU_rr_wb<0b0100000, 0b001, OPC_PULP_OP, "p.machhu">;
 def P_MACUN :    Pulp_ALU_rri_wb    <0b00, 0b001, OPC_PULP_OP, "p.macun">;
 def P_MACHHUN :  Pulp_ALU_rri_wb    <0b01, 0b001, OPC_PULP_OP, "p.machhun">;
 def P_MACURN :   Pulp_ALU_rri_wb    <0b00, 0b101, OPC_PULP_OP, "p.macurn">;
 def P_MACHHURN : Pulp_ALU_rri_wb    <0b01, 0b101, OPC_PULP_OP, "p.machhurn">;
+} // Predicates = [IsRV32, HasPULPExtMacrnhi], DecoderNamespace = "RV32Xpulpmacrnhi"
 
+let Predicates = [IsRV32, HasPULPExtPartmac], DecoderNamespace = "RV32Xpulppartmac" in {
+def P_MACS :     Pulp_ALU_rr_wb<0b1000000, 0b001, OPC_PULP_OP, "p.macs">;
+def P_MACHHS :   Pulp_ALU_rr_wb<0b1100000, 0b001, OPC_PULP_OP, "p.machhs">;
+def P_MACU :     Pulp_ALU_rr_wb<0b0000000, 0b001, OPC_PULP_OP, "p.macu">;
+def P_MACHHU :   Pulp_ALU_rr_wb<0b0100000, 0b001, OPC_PULP_OP, "p.machhu">;
+} // Predicates = [IsRV32, HasPULPExtPartmac], DecoderNamespace = "RV32Xpulppartmac"
+
+let Predicates = [IsRV32, HasPULPExtVect], DecoderNamespace = "RV32Xpulpvect" in {
 // Instructions: packed vector ALU
 defm PV_ADD  : SC_SCI_H_B<0b00000, 0, simm6, "add">;
 defm PV_SUB  : SC_SCI_H_B<0b00001, 0, simm6, "sub">;
@@ -847,6 +877,14 @@ let hasSideEffects = 0, mayStore = 0, mayLoad = 0, rs2 = 0 in {
                          "pv.abs.b", "$rd, $rs1">, Sched<[WriteIALU, ReadIALU]>;
 }
 
+// Pseudos used to lower vector splat operations on packed SIMD data types
+let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
+  def PseudoPV_ADD_SC_H_VL  : Pseudo<(outs PulpV2:$dst), (ins GPR:$src1, GPR:$src2, AVL:$vl),[]>;
+  def PseudoPV_ADD_SC_B_VL  : Pseudo<(outs PulpV4:$dst), (ins GPR:$src1, GPR:$src2, AVL:$vl),[]>;
+  def PseudoPV_ADD_SCI_H_VL : Pseudo<(outs PulpV2:$dst), (ins GPR:$src1, simm6:$imm, AVL:$vl),[]>;
+  def PseudoPV_ADD_SCI_B_VL : Pseudo<(outs PulpV4:$dst), (ins GPR:$src1, simm6:$imm, AVL:$vl),[]>;
+}
+
 def PV_EXTRACT_H : Pulp_ALU_vsci<0b01111, 0, 0b110, "pv.extract.h", PulpV2, uimm6, GPR>;
 def PV_EXTRACT_B : Pulp_ALU_vsci<0b01111, 0, 0b111, "pv.extract.b", PulpV4, uimm6, GPR>;
 def PV_EXTRACTU_H : Pulp_ALU_vsci<0b10010, 0, 0b110, "pv.extractu.h", PulpV2, uimm6, GPR>;
@@ -861,6 +899,27 @@ defm PV_SDOTUP  : SDOTP<0b10100, 0, uimm6, "sdotup">;
 defm PV_SDOTUSP : SDOTP<0b10101, 0, simm6, "sdotusp">;
 defm PV_SDOTSP  : SDOTP<0b10111, 0, simm6, "sdotsp">;
 
+// Vectorial comparison operations
+defm PV_CMPEQ  : SC_SCI_H_B<0b00000, 1, simm6, "cmpeq">;
+defm PV_CMPNE  : SC_SCI_H_B<0b00001, 1, simm6, "cmpne">;
+defm PV_CMPGT  : SC_SCI_H_B<0b00010, 1, simm6, "cmpgt">;
+defm PV_CMPGE  : SC_SCI_H_B<0b00011, 1, simm6, "cmpge">;
+defm PV_CMPLT  : SC_SCI_H_B<0b00100, 1, simm6, "cmplt">;
+defm PV_CMPLE  : SC_SCI_H_B<0b00101, 1, simm6, "cmple">;
+defm PV_CMPGTU : SC_SCI_H_B<0b00110, 1, uimm6, "cmpgtu">;
+defm PV_CMPGEU : SC_SCI_H_B<0b00111, 1, uimm6, "cmpgeu">;
+defm PV_CMPLTU : SC_SCI_H_B<0b01000, 1, uimm6, "cmpltu">;
+defm PV_CMPLEU : SC_SCI_H_B<0b01001, 1, uimm6, "cmpleu">;
+
+let isCodeGenOnly = 1 in { // Helper for Patterns
+  def P_INSERTR_v2 : Pulp_ALU_rr_wb<0b1000000, 0b010, OPC_OP, "p.insertr", GPR, GPR, PulpV2>;
+  def P_INSERTR_v4 : Pulp_ALU_rr_wb<0b1000000, 0b010, OPC_OP, "p.insertr", GPR, GPR, PulpV4>;
+  def PV_SHUFFLE_H_GPR : Pulp_ALU_rr<0b1100000, 0b000, OPC_OP_V, "pv.shuffle.h", PulpV2, GPR, GPR>;
+  def PV_SHUFFLE_B_GPR : Pulp_ALU_rr<0b1100000, 0b001, OPC_OP_V, "pv.shuffle.b", PulpV4, GPR, GPR>;
+}
+} // Predicates = [IsRV32, HasPULPExtVect], DecoderNamespace = "RV32Xpulpvect"
+
+let Predicates = [IsRV32, HasPULPExtVectshufflepack], DecoderNamespace = "RV32Xpulpvectshufflepack" in {
 def PV_SHUFFLE_H       : Pulp_ALU_rr<0b1100000, 0b000, OPC_OP_V, "pv.shuffle.h", PulpV2>;
 def PV_SHUFFLE_SCI_H   : Pulp_ALU_vsci<0b11000, 0, 0b110, "pv.shuffle.sci.h", PulpV2, uimm6>;
 def PV_SHUFFLE_B       : Pulp_ALU_rr<0b1100000, 0b001, OPC_OP_V, "pv.shuffle.b", PulpV4>;
@@ -877,19 +936,10 @@ def PV_PACKLO_B : Pulp_ALU_rr_wb<0b1110000, 0b001, OPC_OP_V, "pv.packlo.b", GPR,
 
 let isCodeGenOnly = 1 in
 def PV_PACKHI_B_nowb : Pulp_ALU_rr<0b1101100, 0b001, OPC_OP_V, "pv.packhi.b", GPR, GPR, PulpV4>;
+} // Predicates = [IsRV32, HasPULPExtVectshufflepack], DecoderNamespace = "RV32Xpulpvectshufflepack"
 
-// Vectorial comparison operations
-defm PV_CMPEQ  : SC_SCI_H_B<0b00000, 1, simm6, "cmpeq">;
-defm PV_CMPNE  : SC_SCI_H_B<0b00001, 1, simm6, "cmpne">;
-defm PV_CMPGT  : SC_SCI_H_B<0b00010, 1, simm6, "cmpgt">;
-defm PV_CMPGE  : SC_SCI_H_B<0b00011, 1, simm6, "cmpge">;
-defm PV_CMPLT  : SC_SCI_H_B<0b00100, 1, simm6, "cmplt">;
-defm PV_CMPLE  : SC_SCI_H_B<0b00101, 1, simm6, "cmple">;
-defm PV_CMPGTU : SC_SCI_H_B<0b00110, 1, uimm6, "cmpgtu">;
-defm PV_CMPGEU : SC_SCI_H_B<0b00111, 1, uimm6, "cmpgeu">;
-defm PV_CMPLTU : SC_SCI_H_B<0b01000, 1, uimm6, "cmpltu">;
-defm PV_CMPLEU : SC_SCI_H_B<0b01001, 1, uimm6, "cmpleu">;
-
+let Predicates = [IsRV32, HasPULPExtPostmod], DecoderNamespace = "RV32Xpulppostmod" in {
+// Instructions: Postmod load and store instructions
 defm P_LB  : Pulp_Load<0b0000000, 0b000, "p.lb">,  Sched<[WriteLDB, ReadMemBase]>;
 defm P_LBU : Pulp_Load<0b0100000, 0b100, "p.lbu">, Sched<[WriteLDB, ReadMemBase]>;
 defm P_LH  : Pulp_Load<0b0001000, 0b001, "p.lh">,  Sched<[WriteLDH, ReadMemBase]>;
@@ -899,23 +949,7 @@ defm P_LW  : Pulp_Load<0b0010000, 0b010, "p.lw">,  Sched<[WriteLDW, ReadMemBase]
 defm P_SB : Pulp_Store<0b00, "p.sb">, Sched<[WriteSTB, ReadStoreData, ReadMemBase]>;
 defm P_SH : Pulp_Store<0b01, "p.sh">, Sched<[WriteSTH, ReadStoreData, ReadMemBase]>;
 defm P_SW : Pulp_Store<0b10, "p.sw">, Sched<[WriteSTW, ReadStoreData, ReadMemBase]>;
-
-let isCodeGenOnly = 1 in { // Helper for Patterns
-  def P_INSERTR_v2 : Pulp_ALU_rr_wb<0b1000000, 0b010, OPC_OP, "p.insertr", GPR, GPR, PulpV2>;
-  def P_INSERTR_v4 : Pulp_ALU_rr_wb<0b1000000, 0b010, OPC_OP, "p.insertr", GPR, GPR, PulpV4>;
-  def PV_SHUFFLE_H_GPR : Pulp_ALU_rr<0b1100000, 0b000, OPC_OP_V, "pv.shuffle.h", PulpV2, GPR, GPR>;
-  def PV_SHUFFLE_B_GPR : Pulp_ALU_rr<0b1100000, 0b001, OPC_OP_V, "pv.shuffle.b", PulpV4, GPR, GPR>;
-}
-
-// Pseudos used to lower vector splat operations on packed SIMD data types
-let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
-  def PseudoPV_ADD_SC_H_VL  : Pseudo<(outs PulpV2:$dst), (ins GPR:$src1, GPR:$src2, AVL:$vl),[]>;
-  def PseudoPV_ADD_SC_B_VL  : Pseudo<(outs PulpV4:$dst), (ins GPR:$src1, GPR:$src2, AVL:$vl),[]>;
-  def PseudoPV_ADD_SCI_H_VL : Pseudo<(outs PulpV2:$dst), (ins GPR:$src1, simm6:$imm, AVL:$vl),[]>;
-  def PseudoPV_ADD_SCI_B_VL : Pseudo<(outs PulpV4:$dst), (ins GPR:$src1, simm6:$imm, AVL:$vl),[]>;
-}
-
-} // Predicates = [IsRV32, HasPULPExtV2], DecoderNamespace = "RV32Xpulp"
+} // Predicates = [IsRV32, HasPULPExtPostmod], DecoderNamespace = "RV32Xpulppostmod"
 
 //===----------------------------------------------------------------------===//
 // Codegen pattern templates
@@ -1092,9 +1126,8 @@ def dotsp_sc_b : dotp_sc_b<sbextract>;
 // Pseudo-instructions and codegen patterns
 //===----------------------------------------------------------------------===//
 
-let Predicates = [IsRV32, HasPULPExtV2] in {
-
-multiclass int_mul_mac_N_RN<string intrin, string instr> {
+let Predicates = [IsRV32, HasPULPExtMulrnhi] in {
+multiclass int_mul_N_RN<string intrin, string instr> {
   // mul<op>N: mul op with normalization factor as immediate
   def : Pat<(!cast<Intrinsic>("int_riscv_pulp_mul" # intrin # "N")
               GPR:$rs1, GPR:$rs2, tuimm5:$shift),
@@ -1105,6 +1138,42 @@ multiclass int_mul_mac_N_RN<string intrin, string instr> {
               GPR:$rs1, GPR:$rs2, tuimm5:$shift, timm),
             (!cast<RVInst>("P_MUL" # instr # "RN")
               GPR:$rs1, GPR:$rs2, tuimm5:$shift)>;
+}
+
+defm : int_mul_N_RN<"s",   "S">;
+defm : int_mul_N_RN<"u",   "U">;
+defm : int_mul_N_RN<"hhs", "HHS">;
+defm : int_mul_N_RN<"hhu", "HHU">;
+
+def : Pat<(muls GPR:$rs1, GPR:$rs2),
+          (P_MULS GPR:$rs1, GPR:$rs2)>;
+def : Pat<(mulhhs GPR:$rs1, GPR:$rs2),
+          (P_MULHHS GPR:$rs1, GPR:$rs2)>;
+def : Pat<(sra (muls GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MULSN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(sra (mulhhs GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MULHHSN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(shiftRound (muls GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MULSRN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(shiftRound (mulhhs GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MULHHSRN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+
+def : Pat<(mulu GPR:$rs1, GPR:$rs2),
+          (P_MULU GPR:$rs1, GPR:$rs2)>;
+def : Pat<(mulhhu GPR:$rs1, GPR:$rs2),
+          (P_MULHHU GPR:$rs1, GPR:$rs2)>;
+def : Pat<(srl (mulu GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MULUN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(srl (mulhhu GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MULHHUN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(ushiftRound (mulu GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MULURN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(ushiftRound (mulhhu GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MULHHURN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+} // Predicates = [IsRV32, HasPULPExtMulrnhi]
+
+let Predicates = [IsRV32, HasPULPExtMacrnhi] in {
+multiclass int_mac_N_RN<string intrin, string instr> {
   // mac<op>N: mac op with normalization factor as immediate
   def : Pat<(!cast<Intrinsic>("int_riscv_pulp_mac" # intrin # "N")
               GPR:$rs1, GPR:$rs2, GPR:$rd, tuimm5:$shift),
@@ -1117,8 +1186,44 @@ multiclass int_mul_mac_N_RN<string intrin, string instr> {
               GPR:$rd, GPR:$rs1, GPR:$rs2, tuimm5:$shift)>;
 }
 
-// Patterns for bit manipulation operations
+defm : int_mac_N_RN<"s",   "S">;
+defm : int_mac_N_RN<"u",   "U">;
+defm : int_mac_N_RN<"hhs", "HHS">;
+defm : int_mac_N_RN<"hhu", "HHU">;
 
+def : Pat<(sra (macs GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MACSN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(sra (machhs GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MACHHSN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(shiftRound (macs GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MACSRN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(shiftRound (machhs GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MACHHSRN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+
+def : Pat<(srl (macu GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MACUN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(srl (machhu GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MACHHUN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(ushiftRound (macu GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MACURN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+def : Pat<(ushiftRound (machhu GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
+          (P_MACHHURN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+} // Predicates = [IsRV32, HasPULPExtMacrnhi]
+
+let Predicates = [IsRV32, HasPULPExtPartmac] in {
+def : Pat<(macs GPR:$rd, GPR:$rs1, GPR:$rs2),
+          (P_MACS GPR:$rd, GPR:$rs1, GPR:$rs2)>;
+def : Pat<(machhs GPR:$rd, GPR:$rs1, GPR:$rs2),
+          (P_MACHHS GPR:$rd, GPR:$rs1, GPR:$rs2)>;
+
+def : Pat<(macu GPR:$rd, GPR:$rs1, GPR:$rs2),
+          (P_MACU GPR:$rd, GPR:$rs1, GPR:$rs2)>;
+def : Pat<(machhu GPR:$rd, GPR:$rs1, GPR:$rs2),
+          (P_MACHHU GPR:$rd, GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [IsRV32, HasPULPExtPartmac]
+
+// Patterns for bit manipulation operations
+let Predicates = [IsRV32, HasPULPExtBitop] in {
 // extract
 // widthMinus1 and shift immediates
 def : Pat<(extract:$extract GPR:$rs1, uimm5, uimm5:$shiftRight),
@@ -1247,21 +1352,31 @@ def : Pat<(ctlz_zero_undef (xor GPR:$rs1, (sra GPR:$rs1, (i32 31)))), (P_CLB GPR
 def : Pat<(ctpop GPR:$rs1), (P_CNT GPR:$rs1)>;
 def : PatGprGpr<rotr, P_ROR>;
 
-// Patterns for general ALU operations
-
-def : Pat<(abs GPR:$rs1), (P_ABS GPR:$rs1)>;
-def : PatGprGpr<setle, P_SLET>;
-def : PatGprGpr<setule, P_SLETU>;
-def : PatGprGpr<smin, P_MIN>;
-def : PatGprGpr<umin, P_MINU>;
-def : PatGprGpr<smax, P_MAX>;
-def : PatGprGpr<umax, P_MAXU>;
-
 def : Pat<(sext_inreg GPR:$rs1, i16), (P_EXTHS GPR:$rs1)>;
 def : Pat<(sext_inreg GPR:$rs1, i8 ), (P_EXTBS GPR:$rs1)>;
 def : Pat<(and GPR:$rs1, 0xffff), (P_EXTHZ GPR:$rs1)>;
 def : Pat<(and GPR:$rs1, 0xff  ), (P_EXTBZ GPR:$rs1)>;
+} // Predicates = [IsRV32, HasPULPExtBitop]
 
+// Patterns for general ALU operations
+
+let Predicates = [IsRV32, HasPULPExtAbs] in {
+def : Pat<(abs GPR:$rs1), (P_ABS GPR:$rs1)>;
+} // Predicates = [IsRV32, HasPULPExtAbs]
+
+let Predicates = [IsRV32, HasPULPExtSlet] in {
+def : PatGprGpr<setle, P_SLET>;
+def : PatGprGpr<setule, P_SLETU>;
+} // Predicates = [IsRV32, HasPULPExtSlet]
+
+let Predicates = [IsRV32, HasPULPExtMinmax] in {
+def : PatGprGpr<smin, P_MIN>;
+def : PatGprGpr<umin, P_MINU>;
+def : PatGprGpr<smax, P_MAX>;
+def : PatGprGpr<umax, P_MAXU>;
+} // Predicates = [IsRV32, HasPULPExtMinmax]
+
+let Predicates = [IsRV32, HasPULPExtClip] in {
 def : Pat<(clip negativePowerOf2, powerOf2Minus1:$upperBound, GPR:$rs1),
           (P_CLIP GPR:$rs1, (trailing1sPlus1 imm:$upperBound))>;
 def : Pat<(between (not GPR:$rs2), GPR:$rs2, GPR:$rs1),
@@ -1270,7 +1385,9 @@ def : Pat<(betweenu powerOf2Minus1:$upperBound, GPR:$rs1),
           (P_CLIPU GPR:$rs1, (trailing1sPlus1 imm:$upperBound))>;
 def : Pat<(betweenu GPR:$rs2, GPR:$rs1),
           (P_CLIPUR GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [IsRV32, HasPULPExtClip]
 
+let Predicates = [IsRV32, HasPULPExtAddsubrn] in {
 def : Pat<(sra (add GPR:$rs1, GPR:$rs2), uimm5:$Is3),
           (P_ADDN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
 def : Pat<(srl (add GPR:$rs1, GPR:$rs2), uimm5:$Is3),
@@ -1306,71 +1423,25 @@ def : Pat<(sra (add (sub GPR:$rd, GPR:$rs1), (roundBit GPR:$rs2)), GPR:$rs2),
           (P_SUBRNR  GPR:$rd, GPR:$rs1, GPR:$rs2)>;
 def : Pat<(srl (add (sub GPR:$rd, GPR:$rs1), (roundBit GPR:$rs2)), GPR:$rs2),
           (P_SUBURNR GPR:$rd, GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [IsRV32, HasPULPExtAddsubrn]
 
 // Patterns for immediate branching Operations
+let Predicates = [IsRV32, HasPULPExtBr] in {
 def : Pat<(brcond (XLenVT (seteq GPR:$rs1, simm5:$imm5)), bb:$imm12),
           (P_BEQIMM GPR:$rs1, simm5:$imm5, simm13_lsb0:$imm12)>;
 def : Pat<(brcond (XLenVT (setne GPR:$rs1, simm5:$imm5)), bb:$imm12),
           (P_BNEIMM GPR:$rs1, simm5:$imm5, simm13_lsb0:$imm12)>;
+} // Predicates = [IsRV32, HasPULPExtBr]
 
+let Predicates = [IsRV32, HasPULPExtMacsi] in {
 def : Pat<(add GPR:$rd, (mul GPR:$rs1, GPR:$rs2)),
           (P_MAC GPR:$rd, GPR:$rs1, GPR:$rs2)>;
 def : Pat<(sub GPR:$rd, (mul GPR:$rs1, GPR:$rs2)),
           (P_MSU GPR:$rd, GPR:$rs1, GPR:$rs2)>;
-
-def : Pat<(muls GPR:$rs1, GPR:$rs2),
-          (P_MULS GPR:$rs1, GPR:$rs2)>;
-def : Pat<(mulhhs GPR:$rs1, GPR:$rs2),
-          (P_MULHHS GPR:$rs1, GPR:$rs2)>;
-def : Pat<(sra (muls GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MULSN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(sra (mulhhs GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MULHHSN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(shiftRound (muls GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MULSRN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(shiftRound (mulhhs GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MULHHSRN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-
-def : Pat<(mulu GPR:$rs1, GPR:$rs2),
-          (P_MULU GPR:$rs1, GPR:$rs2)>;
-def : Pat<(mulhhu GPR:$rs1, GPR:$rs2),
-          (P_MULHHU GPR:$rs1, GPR:$rs2)>;
-def : Pat<(srl (mulu GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MULUN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(srl (mulhhu GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MULHHUN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(ushiftRound (mulu GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MULURN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(ushiftRound (mulhhu GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MULHHURN GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-
-def : Pat<(macs GPR:$rd, GPR:$rs1, GPR:$rs2),
-          (P_MACS GPR:$rd, GPR:$rs1, GPR:$rs2)>;
-def : Pat<(machhs GPR:$rd, GPR:$rs1, GPR:$rs2),
-          (P_MACHHS GPR:$rd, GPR:$rs1, GPR:$rs2)>;
-def : Pat<(sra (macs GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MACSN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(sra (machhs GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MACHHSN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(shiftRound (macs GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MACSRN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(shiftRound (machhs GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MACHHSRN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-
-def : Pat<(macu GPR:$rd, GPR:$rs1, GPR:$rs2),
-          (P_MACU GPR:$rd, GPR:$rs1, GPR:$rs2)>;
-def : Pat<(machhu GPR:$rd, GPR:$rs1, GPR:$rs2),
-          (P_MACHHU GPR:$rd, GPR:$rs1, GPR:$rs2)>;
-def : Pat<(srl (macu GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MACUN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(srl (machhu GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MACHHUN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(ushiftRound (macu GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MACURN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
-def : Pat<(ushiftRound (machhu GPR:$rd, GPR:$rs1, GPR:$rs2), uimm5:$Is3),
-          (P_MACHHURN GPR:$rd, GPR:$rs1, GPR:$rs2, uimm5:$Is3)>;
+} // Predicates = [IsRV32, HasPULPExtMacsi]
 
 // Patterns for vectorial ALU operations
+let Predicates = [IsRV32, HasPULPExtVect] in {
 class PatV2V2<SDPatternOperator OpNode, RVInst Inst>
     : Pat<(OpNode PulpV2:$rs1, PulpV2:$rs2), (Inst PulpV2:$rs1, PulpV2:$rs2)>;
 
@@ -1577,24 +1648,6 @@ def : Pat<(add GPR:$rd, (dotsp_sc_b PulpV4:$rs1, (sext_inreg GPR:$rs2, i8))),
 def : Pat<(add GPR:$rd, (dotsp_sc_b PulpV4:$rs1, simm6:$sci)),
           (PV_SDOTSP_SCI_B GPR:$rd, PulpV4:$rs1, simm6:$sci)>;
 
-def : Pat<(v2i16 (build_vector (i32 (vector_extract PulpV2:$rs1, GPR:$index0)),
-                               (i32 (vector_extract PulpV2:$rs1, GPR:$index1)))),
-          (PV_SHUFFLE_H PulpV2:$rs1, (PV_PACK_H GPR:$index1, GPR:$index0))>;
-
-def : Pat<(v4i8 (build_vector (i32 (vector_extract PulpV4:$rs1, GPR:$index0)),
-                              (i32 (vector_extract PulpV4:$rs1, GPR:$index1)),
-                              (i32 (vector_extract PulpV4:$rs1, GPR:$index2)),
-                              (i32 (vector_extract PulpV4:$rs1, GPR:$index3)))),
-          (PV_SHUFFLE_B PulpV4:$rs1, (PV_PACKLO_B (PV_PACKHI_B_nowb GPR:$index3,
-                                     GPR:$index2), GPR:$index1, GPR:$index0))>;
-
-
-def : Pat<(v2i16 (build_vector GPR:$rs1, GPR:$rs2)),
-          (PV_PACK_H GPR:$rs2, GPR:$rs1)>;
-def : Pat<(v4i8 (build_vector GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4)),
-          (PV_PACKLO_B (PV_PACKHI_B_nowb GPR:$rs4, GPR:$rs3), GPR:$rs2, GPR:$rs1)>;
-
-def : Pat<(v2i16 (splat_vector GPR:$rs1)), (PV_PACK_H GPR:$rs1, GPR:$rs1)>;
 def : Pat<(v4i8 (splat_vector GPR:$rs1)), (PV_ADD_SC_B X0, GPR:$rs1)>;
 
 
@@ -1624,7 +1677,30 @@ def : Pat<(v2i16 (bitconvert GPR:$rs1)), (v2i16 PulpV2:$rs1)>;
 def : Pat<(v4i8 (bitconvert GPR:$rs1)), (v4i8 PulpV4:$rs1)>;
 def : Pat<(i32 (bitconvert PulpV2:$rs1)), (i32 GPR:$rs1)>;
 def : Pat<(i32 (bitconvert PulpV4:$rs1)), (i32 GPR:$rs1)>;
+} // Predicates = [IsRV32, HasPULPExtVect]
 
+let Predicates = [IsRV32, HasPULPExtVectshufflepack] in {
+def : Pat<(v2i16 (build_vector (i32 (vector_extract PulpV2:$rs1, GPR:$index0)),
+                               (i32 (vector_extract PulpV2:$rs1, GPR:$index1)))),
+          (PV_SHUFFLE_H PulpV2:$rs1, (PV_PACK_H GPR:$index1, GPR:$index0))>;
+
+def : Pat<(v4i8 (build_vector (i32 (vector_extract PulpV4:$rs1, GPR:$index0)),
+                              (i32 (vector_extract PulpV4:$rs1, GPR:$index1)),
+                              (i32 (vector_extract PulpV4:$rs1, GPR:$index2)),
+                              (i32 (vector_extract PulpV4:$rs1, GPR:$index3)))),
+          (PV_SHUFFLE_B PulpV4:$rs1, (PV_PACKLO_B (PV_PACKHI_B_nowb GPR:$index3,
+                                     GPR:$index2), GPR:$index1, GPR:$index0))>;
+
+
+def : Pat<(v2i16 (build_vector GPR:$rs1, GPR:$rs2)),
+          (PV_PACK_H GPR:$rs2, GPR:$rs1)>;
+def : Pat<(v4i8 (build_vector GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4)),
+          (PV_PACKLO_B (PV_PACKHI_B_nowb GPR:$rs4, GPR:$rs3), GPR:$rs2, GPR:$rs1)>;
+
+def : Pat<(v2i16 (splat_vector GPR:$rs1)), (PV_PACK_H GPR:$rs1, GPR:$rs1)>;
+} // Predicates = [IsRV32, HasPULPExtVectshufflepack]
+
+let Predicates = [IsRV32, HasPULPExtPostmod] in {
 // Patterns for load/store instructions
 
 // post increment loads need custom selection, because tablegen can't deal with
@@ -1661,44 +1737,81 @@ def : Pat<(truncstorei16 GPR:$val, (add GPR:$base, GPR:$offset)),
     (P_SH_rr GPR:$val, GPR:$base, GPR:$offset)>;
 def : Pat<(store GPR:$val, (add GPR:$base, GPR:$offset)),
     (P_SW_rr GPR:$val, GPR:$base, GPR:$offset)>;
+} // Predicates = [IsRV32, HasPULPExtPostmod]
 
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions and codegen patterns
 //===----------------------------------------------------------------------===//
 
+let Predicates = [IsRV32, HasPULPExtElw] in {
 def : Pat<(int_riscv_pulp_event_unit_read GPR:$rs, simm12:$simm12),
           (PULP_ELW GPR:$rs, simm12:$simm12)>;
 def : Pat<(int_riscv_pulp_event_unit_read GPR:$rs, GPR:$off),
           (PULP_ELW (ADD GPR:$rs, GPR:$off), 0)>;
-def : Pat<(int_riscv_pulp_bitinsert GPR:$rd, GPR:$rs1, uimm5:$ls2, uimm5:$ls3),
-          (P_INSERT GPR:$rd, GPR:$rs1, uimm5:$ls2, uimm5:$ls3)>;
+} // Predicates = [IsRV32, HasPULPExtElw]
 
 class UnaryBuiltin<Intrinsic intrinsic, Instruction instruction>
       : Pat<(intrinsic GPR:$rs1), (instruction GPR:$rs1)>;
+
+let Predicates = [IsRV32, HasPULPExtBitop] in {
+def : Pat<(int_riscv_pulp_bitinsert GPR:$rd, GPR:$rs1, uimm5:$ls2, uimm5:$ls3),
+          (P_INSERT GPR:$rd, GPR:$rs1, uimm5:$ls2, uimm5:$ls3)>;
 
 def : UnaryBuiltin<int_riscv_pulp_fl1, P_FL1>;
 def : UnaryBuiltin<int_riscv_pulp_ff1, P_FF1>;
 def : UnaryBuiltin<int_riscv_pulp_clb, P_CLB>;
 def : UnaryBuiltin<int_riscv_pulp_cnt, P_CNT>;
 def : Pat<(int_riscv_pulp_parity GPR:$rs1), (P_BCLR (P_CNT GPR:$rs1), 30, 1)>;
-def : UnaryBuiltin<int_riscv_pulp_abs, P_ABS>;
+def : PatGprGpr<int_riscv_pulp_rotr, P_ROR>;
 
+def : Pat<(int_riscv_pulp_bclr GPR:$rs1, shiftedFlippedMask:$mask),
+          (P_BCLR GPR:$rs1, (flippedMaskWidthMinus1 imm:$mask), (trailing1s imm:$mask))>;
+def : PatGprGpr<int_riscv_pulp_bclr_r, P_BCLRR>;
+
+def : Pat<(int_riscv_pulp_bset GPR:$rs1, shiftedMask:$mask),
+          (P_BSET GPR:$rs1, (maskWidthMinus1 imm:$mask), (trailing0s imm:$mask))>;
+def : PatGprGpr<int_riscv_pulp_bset_r, P_BSETR>;
+
+def : Pat<(int_riscv_pulp_bextract GPR:$rs1, tuimm5:$size, tuimm5:$shift),
+          (P_EXTRACT GPR:$rs1, tuimm5:$size, tuimm5:$shift)>;
+def : PatGprGpr<int_riscv_pulp_bextract_r, P_EXTRACTR>;
+
+def : Pat<(int_riscv_pulp_bextractu GPR:$rs1, tuimm5:$size, tuimm5:$shift),
+          (P_EXTRACTU GPR:$rs1, tuimm5:$size, tuimm5:$shift)>;
+def : PatGprGpr<int_riscv_pulp_bextractu_r, P_EXTRACTUR>;
+
+def : Pat<(int_riscv_pulp_binsert GPR:$rd, shiftedFlippedMask,
+                                  GPR:$rs1, shiftedMask:$srcMask, tuimm5:$shift),
+          (P_INSERT GPR:$rd, GPR:$rs1, (maskWidthMinus1 imm:$srcMask), tuimm5:$shift)>;
+def : Pat<(int_riscv_pulp_binsert_r GPR:$rd, GPR:$rs1, GPR:$rs2),
+          (P_INSERTR GPR:$rd, GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [IsRV32, HasPULPExtBitop]
+
+let Predicates = [IsRV32, HasPULPExtAbs] in {
+def : UnaryBuiltin<int_riscv_pulp_abs, P_ABS>;
+} // Predicates = [IsRV32, HasPULPExtAbs]
+
+let Predicates = [IsRV32, HasPULPExtMacsi] in {
 def : Pat<(int_riscv_pulp_mac GPR:$rs1, GPR:$rs2, GPR:$rd), (P_MAC GPR:$rd, GPR:$rs1, GPR:$rs2)>;
 def : Pat<(int_riscv_pulp_msu GPR:$rs1, GPR:$rs2, GPR:$rd), (P_MSU GPR:$rd, GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [IsRV32, HasPULPExtMacsi]
 
+let Predicates = [IsRV32, HasPULPExtPartmac] in {
 def : Pat<(int_riscv_pulp_macs GPR:$rs1, GPR:$rs2, GPR:$rd), (P_MACS GPR:$rd, GPR:$rs1, GPR:$rs2)>;
 def : Pat<(int_riscv_pulp_macu GPR:$rs1, GPR:$rs2, GPR:$rd), (P_MACU GPR:$rd, GPR:$rs1, GPR:$rs2)>;
 
 def : Pat<(int_riscv_pulp_machhs GPR:$rs1, GPR:$rs2, GPR:$rd), (P_MACHHS GPR:$rd, GPR:$rs1, GPR:$rs2)>;
 def : Pat<(int_riscv_pulp_machhu GPR:$rs1, GPR:$rs2, GPR:$rd), (P_MACHHU GPR:$rd, GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [IsRV32, HasPULPExtPartmac]
 
-def : PatGprGpr<int_riscv_pulp_rotr, P_ROR>;
-
+let Predicates = [IsRV32, HasPULPExtMinmax] in {
 def : PatGprGpr<int_riscv_pulp_maxsi, P_MAX>;
 def : PatGprGpr<int_riscv_pulp_minsi, P_MIN>;
 def : PatGprGpr<int_riscv_pulp_maxusi, P_MAXU>;
 def : PatGprGpr<int_riscv_pulp_minusi, P_MINU>;
+} // Predicates = [IsRV32, HasPULPExtMinmax]
 
+let Predicates = [IsRV32, HasPULPExtVect] in {
 multiclass BinaryVectorBuiltin<string intrin, string instr> {
   def : PatV2V2<!cast<Intrinsic>("int_riscv_pulp_" # intrin # "2"),
                 !cast<RVInst>("PV_" # instr # "_H")>;
@@ -1772,17 +1885,16 @@ multiclass DotproductBuiltin<string intrin, string instr> {
 defm : DotproductBuiltin<"s",  "S">;
 defm : DotproductBuiltin<"u",  "U">;
 defm : DotproductBuiltin<"us", "US">;
+} // Predicates = [IsRV32, HasPULPExtVect]
 
+let Predicates = [IsRV32, HasPULPExtMulrnhi] in {
 def : PatGprGpr<int_riscv_pulp_muls, P_MULS>;
 def : PatGprGpr<int_riscv_pulp_mulu, P_MULU>;
 def : PatGprGpr<int_riscv_pulp_mulhhs, P_MULHHS>;
 def : PatGprGpr<int_riscv_pulp_mulhhu, P_MULHHU>;
+} // Predicates = [IsRV32, HasPULPExtMulrnhi]
 
-defm : int_mul_mac_N_RN<"s",   "S">;
-defm : int_mul_mac_N_RN<"u",   "U">;
-defm : int_mul_mac_N_RN<"hhs", "HHS">;
-defm : int_mul_mac_N_RN<"hhu", "HHU">;
-
+let Predicates = [IsRV32, HasPULPExtAddsubrn] in {
 multiclass int_N_RN_r<string intrin, string instr> {
   // <op>N: op with normalization factor as immediate
   def : Pat<(!cast<Intrinsic>("int_riscv_pulp_" # intrin # "N")
@@ -1810,7 +1922,9 @@ defm : int_N_RN_r<"add",  "ADD">;
 defm : int_N_RN_r<"addu", "ADDU">;
 defm : int_N_RN_r<"sub",  "SUB">;
 defm : int_N_RN_r<"subu", "SUBU">;
+} // Predicates = [IsRV32, HasPULPExtAddsubrn]
 
+let Predicates = [IsRV32, HasPULPExtVectshufflepack] in {
 def : Pat<(int_riscv_pulp_pack2 GPR:$rs1, GPR:$rs2),
           (PV_PACK_H GPR:$rs2, GPR:$rs1)>;
 def : Pat<(int_riscv_pulp_pack4 GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4),
@@ -1825,38 +1939,9 @@ def : Pat<(int_riscv_pulp_shuffle2h PulpV2:$rd, PulpV2:$rs1, PulpV2:$rs2),
           (PV_SHUFFLE2_H PulpV2:$rd, PulpV2:$rs1, PulpV2:$rs2)>;
 def : Pat<(int_riscv_pulp_shuffle4b PulpV4:$rd, PulpV4:$rs1, PulpV4:$rs2),
           (PV_SHUFFLE2_B PulpV4:$rd, PulpV4:$rs1, PulpV4:$rs2)>;
+} // Predicates = [IsRV32, HasPULPExtVectshufflepack]
 
-def : Pat<(int_riscv_pulp_bclr GPR:$rs1, shiftedFlippedMask:$mask),
-          (P_BCLR GPR:$rs1, (flippedMaskWidthMinus1 imm:$mask), (trailing1s imm:$mask))>;
-def : PatGprGpr<int_riscv_pulp_bclr_r, P_BCLRR>;
-
-def : Pat<(int_riscv_pulp_bset GPR:$rs1, shiftedMask:$mask),
-          (P_BSET GPR:$rs1, (maskWidthMinus1 imm:$mask), (trailing0s imm:$mask))>;
-def : PatGprGpr<int_riscv_pulp_bset_r, P_BSETR>;
-
-def : Pat<(int_riscv_pulp_bextract GPR:$rs1, tuimm5:$size, tuimm5:$shift),
-          (P_EXTRACT GPR:$rs1, tuimm5:$size, tuimm5:$shift)>;
-def : PatGprGpr<int_riscv_pulp_bextract_r, P_EXTRACTR>;
-
-def : Pat<(int_riscv_pulp_bextractu GPR:$rs1, tuimm5:$size, tuimm5:$shift),
-          (P_EXTRACTU GPR:$rs1, tuimm5:$size, tuimm5:$shift)>;
-def : PatGprGpr<int_riscv_pulp_bextractu_r, P_EXTRACTUR>;
-
-def : Pat<(int_riscv_pulp_binsert GPR:$rd, shiftedFlippedMask,
-                                  GPR:$rs1, shiftedMask:$srcMask, tuimm5:$shift),
-          (P_INSERT GPR:$rd, GPR:$rs1, (maskWidthMinus1 imm:$srcMask), tuimm5:$shift)>;
-def : Pat<(int_riscv_pulp_binsert_r GPR:$rd, GPR:$rs1, GPR:$rs2),
-          (P_INSERTR GPR:$rd, GPR:$rs1, GPR:$rs2)>;
-
-def : Pat<(int_riscv_pulp_clip GPR:$rs1, negativePowerOf2:$lowerBound,
-                               powerOf2Minus1),
-          (P_CLIP GPR:$rs1, (trailing0s imm:$lowerBound))>;
-def : PatGprGpr<int_riscv_pulp_clip_r, P_CLIPR>;
-
-def : Pat<(int_riscv_pulp_clipu GPR:$rs1, 0, powerOf2Minus1:$upperBound),
-          (P_CLIPU GPR:$rs1, (trailing1sPlus1 imm:$upperBound))>;
-def : PatGprGpr<int_riscv_pulp_clipu_r, P_CLIPUR>;
-
+let Predicates = [IsRV32, HasPULPExtPostmod] in {
 def : Pat<(int_riscv_pulp_OffsetedRead GPR:$rs1, GPR:$rs2), (P_LW_rr GPR:$rs1, GPR:$rs2)>;
 def : Pat<(int_riscv_pulp_OffsetedReadHalf GPR:$rs1, GPR:$rs2), (P_LH_rr GPR:$rs1, GPR:$rs2)>;
 def : Pat<(int_riscv_pulp_OffsetedReadByte GPR:$rs1, GPR:$rs2), (P_LB_rr GPR:$rs1, GPR:$rs2)>;
@@ -1867,7 +1952,20 @@ def : Pat<(int_riscv_pulp_OffsetedWriteByte GPR:$rs2, GPR:$rs1, GPR:$rs3), (P_SB
 
 def : Pat<(int_riscv_pulp_read_base_off GPR:$rs1, GPR:$rs2), (P_LW_rr GPR:$rs1, GPR:$rs2)>;
 def : Pat<(int_riscv_pulp_write_base_off GPR:$rs2, GPR:$rs1, GPR:$rs3), (P_SW_rr GPR:$rs2, GPR:$rs1, GPR:$rs3)>;
+} // Predicates = [IsRV32, HasPULPExtPostmod]
 
+let Predicates = [IsRV32, HasPULPExtClip] in {
+def : Pat<(int_riscv_pulp_clip GPR:$rs1, negativePowerOf2:$lowerBound,
+                               powerOf2Minus1),
+          (P_CLIP GPR:$rs1, (trailing0s imm:$lowerBound))>;
+def : PatGprGpr<int_riscv_pulp_clip_r, P_CLIPR>;
+
+def : Pat<(int_riscv_pulp_clipu GPR:$rs1, 0, powerOf2Minus1:$upperBound),
+          (P_CLIPU GPR:$rs1, (trailing1sPlus1 imm:$upperBound))>;
+def : PatGprGpr<int_riscv_pulp_clipu_r, P_CLIPUR>;
+} // Predicates = [IsRV32, HasPULPExtClip]
+
+let Predicates = [IsRV32, HasPULPExtV2] in {
 def : Pat<(int_riscv_pulp_spr_read tuimm12:$csr),
           (CSRRS csr_sysreg:$csr, X0)>;
 def : Pat<(int_riscv_pulp_spr_read_vol tuimm12:$csr),
@@ -1896,5 +1994,4 @@ def : Pat<(int_riscv_pulp_IsFc), (SRLI (ANDI (CSRRS MHARTID.Encoding, X0), 0b100
 // Symbols below must be provided by the platform, no CSR involved
 // Note: GCC lowers HasFc to zero immediate
 def : Pat<(int_riscv_pulp_HasFc), (ANDI X0, 0)>;
-
 } // Predicates = [IsRV32, HasPULPExtV2]

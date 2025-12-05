@@ -20,7 +20,14 @@ def RocketModel : SchedMachineModel {
   let UnsupportedFeatures = [HasStdExtZbkb, HasStdExtZbkc, HasStdExtZbkx,
                              HasStdExtZknd, HasStdExtZkne, HasStdExtZknh,
                              HasStdExtZksed, HasStdExtZksh, HasStdExtZkr,
-                             HasVInstructions, HasVInstructionsI64];
+                             HasVInstructions, HasVInstructionsI64, HasPULPExtV2,
+                             HasPULPExtHwloop, HasPULPExtPostmod, HasPULPExtIndregreg,
+                             HasPULPExtElw, HasPULPExtAbs, HasPULPExtSlet,
+                             HasPULPExtMacsi, HasPULPExtMulrnhi, HasPULPExtMacrnhi,
+                             HasPULPExtPartmac, HasPULPExtMinmax, HasPULPExtBitop,
+                             HasPULPExtVect, HasPULPExtVectshufflepack, HasPULPExtVectcomplex,
+                             HasPULPExtClip, HasPULPExtAddsubrn, HasPULPExtBr,
+                             HasPULPExtBitrev, HasPULPExtVectgap8, HasPULPExtVectgap9];
 }
 
 //===----------------------------------------------------------------------===//
