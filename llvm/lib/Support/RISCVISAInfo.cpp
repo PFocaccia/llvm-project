@@ -149,7 +149,8 @@ static const RISCVSupportedExtension SupportedExtensions[] = {
 };
 
 static const RISCVSupportedExtension SupportedExperimentalExtensions[] = {
-    {"zbe", RISCVExtensionVersion{0, 93}},
+    {"xtheadmatrix", RISCVExtensionVersion{0, 1}}, 
+    {"zbe", RISCVExtensionVersion{0, 93}}, 
     {"zbf", RISCVExtensionVersion{0, 93}},
     {"zbm", RISCVExtensionVersion{0, 93}},
     {"zbp", RISCVExtensionVersion{0, 93}},
@@ -1027,3 +1028,4 @@ StringRef RISCVISAInfo::computeDefaultABI() const {
   }
   llvm_unreachable("Invalid XLEN");
 }
+
