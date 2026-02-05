@@ -617,6 +617,12 @@ def HasNoFdiv : Predicate<"Subtarget->hasNoFdiv()">,
                           AssemblerPredicate<(all_of FeatureHasNoFdiv),
                           "Disable fdiv.* and fsqrt.* instructions, delegate to libcalls">;
 
+def FeatureVendorXTHeadMatrix
+    : SubtargetFeature<"experimental-xtheadmatrix", "HasVendorXTHeadMatrix", "true",
+                       "'xtheadmatrix' (T-Head Matrix Extensions)">;
+def HasVendorXTHeadMatrix : Predicate<"Subtarget->hasVendorXTHeadMatrix()">,
+                          AssemblerPredicate<(all_of FeatureVendorXTHeadMatrix),
+                              "'xtheadmatrix' (T-Head Matrix Extensions)">;
 
 //===----------------------------------------------------------------------===//
 // Named operands for CSR instructions.
