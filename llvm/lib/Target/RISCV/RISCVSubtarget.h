@@ -152,6 +152,9 @@ private:
   bool HasExtXfexpauxvecquarter = false;
   bool HasExtXfexpauxvecaltquarter = false;
   // -->
+  // <-- Start of matrix extensions
+  bool HasVendorXTHeadMatrix = false;
+  // -->
   bool HasNoFdiv = false;
   bool HasRV64 = false;
   bool IsRV32E = false;
