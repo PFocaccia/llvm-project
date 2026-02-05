@@ -760,7 +760,8 @@ def : ProcessorModel<"snitch", SnitchModel, [FeatureStdExtM,
                                              FeatureExtXfexpauxvechalf,
                                              FeatureExtXfexpauxvecalthalf,
                                              FeatureExtXfexpauxvecquarter,
-                                             FeatureExtXfexpauxvecaltquarter ]>;
+                                             FeatureExtXfexpauxvecaltquarter,
+                                             FeatureVendorXTHeadMatrix ]>;
 
 def : ProcessorModel<"snitch-mempool", SnitchModel, [FeatureStdExtM,
                                              FeatureStdExtA,
