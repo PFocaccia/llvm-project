@@ -35,3 +35,7 @@ To verify the environment setup, run: `clang --version`, `llc --version`.
 To generate the assembly file: `clang --target=riscv32 -Xclang -target-feature -Xclang +experimental-xtheadmatrix -S helloworld.c -o helloworld.s`
 
 To generate the object file: `clang --target=riscv32 -Xclang -target-feature -Xclang +experimental-xtheadmatrix -c helloworld.c -o helloworld.o`
+
+## Explore obj file
+
+`llvm-objdump -d --mattr=+experimental-xtheadmatrix helloworld.o`
