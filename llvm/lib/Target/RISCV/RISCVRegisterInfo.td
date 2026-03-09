@@ -623,7 +623,7 @@ def AnyReg : RegisterClass<"RISCV", [untyped], 32,
 // borrowed from tile definition in X86RegisterInfo.td
 let CopyCost = -1 in // Don't allow copying of matrix registers
 def MR : RegisterClass<"RISCV", [i32], 2048,
-                         (sequence "M%u", 0, 7)> {
+                         (sequence "M%u", 0, 15)> {
     let Size = 2048;
     let DecoderMethod = "DecodeMRRegisterClass";
 }

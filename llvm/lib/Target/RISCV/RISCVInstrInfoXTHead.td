@@ -14,125 +14,212 @@
 // Experimental RV64 i32 legalization patterns.
 //===----------------------------------------------------------------------===//
 
-class RVMArithBase<bits<4> funct4_h, bits<5> funct5_l, dag outs, dag ins,
-                  string opcodestr, string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatOther> {
-
-  let Inst{31-28} = funct4_h;
-  let Inst{27-25} = 0b000;
-  let Inst{14-12} = 0b000;
-  let Inst{11-7} = funct5_l;
-  let Inst{6-0} = OPC_CUSTOM_0.Value;
-}
-
-class RVMArith<bits<4> funct4_h, bits<5> funct5_l, dag outs, dag ins,
-                  string opcodestr, string argstr>
-    : RVMArithBase<funct4_h, funct5_l, outs, ins, opcodestr, argstr> {
-  bits<3> ms2;
-  bits<3> ms1;
-  bits<2> md ;
-
-  let Inst{24} = 0b0;
-  let Inst{23-21} = ms2;
-  let Inst{20-18} = ms1;
-  let Inst{17} = 0b0;
-  let Inst{16-15} = md ;
-}
-
-class RVMMove<bits<4> funct4_h, bits<5> funct5_l, dag outs, dag ins,
-                  string opcodestr, string argstr>
-    : RVMArithBase<funct4_h, funct5_l, outs, ins, opcodestr, argstr> {
-  bits<3> ms1;
-  bits<3> md ;
-
-  let Inst{24-21} = 0b0000;
-  let Inst{20-18} = ms1;
-  let Inst{17-15} = md ;
-}
-
-class RVMZero<bits<4> funct4_h, bits<5> funct5_l, bits<1> funct, dag outs, dag ins,
-                  string opcodestr, string argstr>
-    : RVMArithBase<funct4_h, funct5_l, outs, ins, opcodestr, argstr> {
-  bits<3> ms1;
-  bits<3> md ;
-
-  let Inst{24} = funct;
-  let Inst{23-18} = 0b000000;
-  let Inst{17-15} = md ;
-}
-
-class RVMLoadStore<bits<1> matrix, bits<3> ldst, bits<2> size, dag outs, dag ins,
+// Matrix Memory Instructions
+class RVMLoadStore<bits<3> ldst, dag outs, dag ins,
                   string opcodestr, string argstr>
     : RVInst<outs, ins, opcodestr, argstr, [], InstFormatOther> {
   bits<5> rs2;
   bits<5> rs1;
-  bits<3> mds3;
+  bits<4> mds3;
 
   let Inst{31-29} = 0b000;
-  let Inst{28}    = matrix;
-  let Inst{27-25} = ldst;
+  let Inst{28-26} = ldst;
+  let Inst{25}    = 0b0;
   let Inst{24-20} = rs2;
   let Inst{19-15} = rs1;
-  let Inst{11-10} = size;
-  let Inst{9-7} = mds3;
+  let Inst{14-11} = mds3;
+  let Inst{10-7}  = 0b0000;
 
   let Inst{6-0} = OPC_CUSTOM_0.Value;
 }
 
-class RVMConfig<bits<3> funct3_h, dag outs, dag ins, string opcodestr, string argstr> 
-  : RVInst<outs, ins, opcodestr, argstr, [], InstFormatOther> {
+// Matrix Arithmetic Instructions
+class RVMArithBase<dag outs, dag ins, string opcodestr, string argstr>
+    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatOther> {
+
+  let Inst{31-29} = 0b001;
+  let Inst{25}    = 0b0;
+  let Inst{14-11} = 0b0000;
+  let Inst{10-7}  = 0b0000;
+
+  let Inst{6-0} = OPC_CUSTOM_0.Value;
+}
+class RVMMACC<dag outs, dag ins, string opcodestr, string argstr>
+    : RVMArithBase<outs, ins, opcodestr, argstr> {
+  
+  bits<4> ms2;
+  bits<4> ms1;
+  bits<2> md ;
+
+  let Inst{28-26} = 0b010;
+  let Inst{24-23} = md;
+  let Inst{22-19} = ms2;
+  let Inst{18-15} = ms1;
+}
+class RVMZeroA<dag outs, dag ins, string opcodestr, string argstr>
+    : RVMArithBase<outs, ins, opcodestr, argstr> {
+
+  bits<2> md ;
+
+  let Inst{28-26} = 0b000;
+  let Inst{24-23} = md;
+  let Inst{22-19} = 0b0000;
+  let Inst{18-15} = 0b0000;
+}
+class RVMZeroM<dag outs, dag ins, string opcodestr, string argstr>
+    : RVMArithBase<outs, ins, opcodestr, argstr> {
+
+  bits<4> ms1;
+
+  let Inst{28-26} = 0b001;
+  let Inst{24-23} = 0b00;
+  let Inst{22-19} = 0b0000;
+  let Inst{18-15} = ms1;
+}
+
+// Matrix Move Instructions
+class RVMMoveBase<dag outs, dag ins, string opcodestr, string argstr>
+    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatOther> {
+
+  let Inst{31-29} = 0b010;
+  let Inst{25}    = 0b0;
+  let Inst{20-19} = 0b00;
+  let Inst{10-7}  = 0b0000;
+
+  let Inst{6-0} = OPC_CUSTOM_0.Value;
+}
+class RVMMoveAM<dag outs, dag ins, string opcodestr, string argstr>
+    : RVMMoveBase<outs, ins, opcodestr, argstr> {
+
+  bits<2> ms1;
+  bits<4> md ;
+
+  let Inst{28-26} = 0b000;
+  let Inst{24-23} = ms1;
+  let Inst{22-21} = 0b00;
+  let Inst{18-15} = 0b0000;
+  let Inst{14-11} = md;
+}
+class RVMMoveAA<dag outs, dag ins, string opcodestr, string argstr>
+    : RVMMoveBase<outs, ins, opcodestr, argstr> {
+
+  bits<2> ms1;
+  bits<2> md ;
+
+  let Inst{28-26} = 0b001;
+  let Inst{24-23} = ms1;
+  let Inst{22-21} = md;
+  let Inst{18-15} = 0b0000;
+  let Inst{14-11} = 0b0000;
+}
+class RVMMoveMA<dag outs, dag ins, string opcodestr, string argstr>
+    : RVMMoveBase<outs, ins, opcodestr, argstr> {
+
+  bits<2> md;
+  bits<4> ms1 ;
+
+  let Inst{28-26} = 0b010;
+  let Inst{24-23} = 0b00;
+  let Inst{22-21} = md;
+  let Inst{18-15} = ms1;
+  let Inst{14-11} = 0b0000;
+}
+class RVMMoveMM<dag outs, dag ins, string opcodestr, string argstr>
+    : RVMMoveBase<outs, ins, opcodestr, argstr> {
+
+  bits<4> md;
+  bits<4> ms1 ;
+
+  let Inst{28-26} = 0b011;
+  let Inst{24-23} = 0b00;
+  let Inst{22-21} = 0b00;
+  let Inst{18-15} = ms1;
+  let Inst{14-11} = md;
+}
+
+// Matrix Configuration Instructions
+class RVMCfgBase<dag outs, dag ins, string opcodestr, string argstr>
+    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatOther> {
+
+  let Inst{31-29} = 0b011;
+  let Inst{25}    = 0b0;
+  let Inst{9-7}   = 0b000;
+
+  let Inst{6-0} = OPC_CUSTOM_0.Value;
+}
+
+class RVMCfgK<dag outs, dag ins, string opcodestr, string argstr> 
+  : RVMCfgBase<outs, ins, opcodestr, argstr> {
     bits<5> rs1;
     bits<5> rd;
 
-    let Inst{31} = 0b0;
-    let Inst{30-28} = funct3_h;
-    let Inst{27-23} = 0b11100;
+    let Inst{28-26} = 0b000;
+    let Inst{24-20} = rd ;
     let Inst{19-15} = rs1;
-    let Inst{14-12} = 0b000;
-    let Inst{11-7}  = rd;
-    let Inst{6-0} = OPC_CUSTOM_0.Value;
+    let Inst{14-13} = 0b00;
+    let Inst{12-10} = 0b000;
 }
+class RVMCfgM<dag outs, dag ins, string opcodestr, string argstr> 
+  : RVMCfgBase<outs, ins, opcodestr, argstr> {
+    bits<5> rs1;
+    bits<5> rd;
+    bits<2> imm2;
 
-class RVMConfigK<bits<3> funct3_h, dag outs, dag ins, string opcodestr, string argstr> 
-  : RVMConfig<funct3_h, outs, ins, opcodestr, argstr> {
-    bits<3> imm3;
-    let Inst{22-20} = imm3;
+    let Inst{28-26} = 0b001;
+    let Inst{24-20} = rd ;
+    let Inst{19-15} = rs1;
+    let Inst{14-13} = imm2{1-0};
+    let Inst{12-10} = 0b000;
+}
+class RVMCfgN<dag outs, dag ins, string opcodestr, string argstr> 
+  : RVMCfgBase<outs, ins, opcodestr, argstr> {
+    bits<5> rs1;
+    bits<5> rd;
+    bits<2> imm2;
+
+    let Inst{28-26} = 0b010;
+    let Inst{24-20} = rd ;
+    let Inst{19-15} = rs1;
+    let Inst{14-13} = imm2{1-0};
+    let Inst{12-10} = 0b000;
+}
+class RVMCfgDT<dag outs, dag ins, string opcodestr, string argstr> 
+  : RVMCfgBase<outs, ins, opcodestr, argstr> {
+    bits<5> Aimm5;
+    bits<5> Bimm5;
+    bits<5> Cimm5;
+
+    let Inst{28-26} = 0b011;
+    let Inst{24-20} = Cimm5{4-0};
+    let Inst{19-15} = Aimm5{4-0};
+    let Inst{14-10} = Bimm5{4-0};
 }
 
 let Predicates = [HasVendorXTHeadMatrix], DecoderNamespace = "XTHeadMatrix",hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
-  let hasSideEffects = 1 in {
-    def MCFGK : RVMConfigK<0b000, (outs GPR:$rd), (ins GPR:$rs1, uimm3:$imm3), "mcfgk", "$rd, $rs1, $imm3">;
-    def MCFGM : RVMConfig<0b001, (outs GPR:$rd), (ins GPR:$rs1), "mcfgm", "$rd, $rs1">;
-    def MCFGN : RVMConfig<0b010, (outs GPR:$rd), (ins GPR:$rs1), "mcfgn", "$rd, $rs1">;
-  }
-  def FMMACC_B : RVMArith<0b0001, 0b00000, (outs ACC:$md), (ins MR:$ms1, MR:$ms2), "fmmacc.b", "$md, $ms2, $ms1">;
-  def FMMACC_H : RVMArith<0b0001, 0b01000, (outs ACC:$md), (ins MR:$ms1, MR:$ms2), "fmmacc.h", "$md, $ms2, $ms1">;
-  def FMMACC_S : RVMArith<0b0001, 0b10000, (outs ACC:$md), (ins MR:$ms1, MR:$ms2), "fmmacc.s", "$md, $ms2, $ms1">;
-  def MMAQA_B  : RVMArith<0b0010, 0b00000, (outs ACC:$md), (ins MR:$ms1, MR:$ms2), "mmaqa.b" , "$md, $ms2, $ms1">;
-  def MMADA_H  : RVMArith<0b0010, 0b01000, (outs ACC:$md), (ins MR:$ms1, MR:$ms2), "mmada.h" , "$md, $ms2, $ms1">;
-  def MMASA_W  : RVMArith<0b0010, 0b10000, (outs ACC:$md), (ins MR:$ms1, MR:$ms2), "mmasa.w" , "$md, $ms2, $ms1">;
-
-  def MMOV_MM  : RVMMove<0b0000, 0b00001, (outs MR:$md), (ins MR:$ms1), "mmov.mm" , "$md, $ms1">;
-  def MMOV_MA  : RVMMove<0b0000, 0b01001, (outs ACC:$md), (ins MR:$ms1), "mmov.ma" , "$md, $ms1">;
-  def MMOV_AM  : RVMMove<0b0000, 0b10001, (outs MR:$md), (ins ACC:$ms1), "mmov.am" , "$md, $ms1">;
-  def MMOV_AA  : RVMMove<0b0000, 0b11001, (outs ACC:$md), (ins ACC:$ms1), "mmov.aa" , "$md, $ms1">;
-
-  def MZERO_M : RVMZero<0b1010, 0b00000, 0b0, (outs MR:$md), (ins), "mzero.m", "$md">;
-  def MZERO_A : RVMZero<0b1010, 0b00000, 0b1, (outs ACC:$md), (ins), "mzero.a", "$md">;
 
   let mayLoad = 1 in {
-    def MLD_LHS_B : RVMLoadStore<0b0, 0b100, 0b00, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.lhs.b", "$mds3, (${rs1}), $rs2">;
-    def MLD_LHS_H : RVMLoadStore<0b0, 0b100, 0b01, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.lhs.h", "$mds3, (${rs1}), $rs2">;
-    def MLD_LHS_W : RVMLoadStore<0b0, 0b100, 0b10, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.lhs.w", "$mds3, (${rs1}), $rs2">;
-    def MLD_RHS_B : RVMLoadStore<0b1, 0b100, 0b00, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.rhs.b", "$mds3, (${rs1}), $rs2">;
-    def MLD_RHS_H : RVMLoadStore<0b1, 0b100, 0b01, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.rhs.h", "$mds3, (${rs1}), $rs2">;
-    def MLD_RHS_W : RVMLoadStore<0b1, 0b100, 0b10, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.rhs.w", "$mds3, (${rs1}), $rs2">;
+    def MLD_LHS : RVMLoadStore<0b000, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.lhs", "$mds3, (${rs1}), $rs2">;
+    def MLD_RHS : RVMLoadStore<0b001, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.rhs", "$mds3, (${rs1}), $rs2">;
   }
 
   let mayStore = 1 in {
-    def MST_B : RVMLoadStore<0b0, 0b101, 0b00, (outs), (ins MR:$mds3, GPR:$rs1, GPR:$rs2), "mst.b", "$mds3, (${rs1}), $rs2">;
-    def MST_H : RVMLoadStore<0b0, 0b101, 0b01, (outs), (ins MR:$mds3, GPR:$rs1, GPR:$rs2), "mst.h", "$mds3, (${rs1}), $rs2">;
-    def MST_W : RVMLoadStore<0b0, 0b101, 0b10, (outs), (ins MR:$mds3, GPR:$rs1, GPR:$rs2), "mst.w", "$mds3, (${rs1}), $rs2">;
+    def MST : RVMLoadStore<0b010, (outs), (ins MR:$mds3, GPR:$rs1, GPR:$rs2), "mst", "$mds3, (${rs1}), $rs2">;
+  }
+
+  def MMACC   : RVMMACC <(outs ACC:$md), (ins MR:$ms1, MR:$ms2), "mmacc", "$md, $ms2, $ms1">;
+  def MZERO_M : RVMZeroM<(outs MR:$md) , (ins)                 , "mzero.m", "$md">;
+  def MZERO_A : RVMZeroA<(outs ACC:$md), (ins)                 , "mzero.a", "$md">;
+  
+  def MMOV_MM  : RVMMoveMM<(outs MR:$md) , (ins MR:$ms1) , "mmov.mm" , "$md, $ms1">;
+  def MMOV_MA  : RVMMoveMA<(outs ACC:$md), (ins MR:$ms1) , "mmov.ma" , "$md, $ms1">;
+  def MMOV_AM  : RVMMoveAM<(outs MR:$md) , (ins ACC:$ms1), "mmov.am" , "$md, $ms1">;
+  def MMOV_AA  : RVMMoveAA<(outs ACC:$md), (ins ACC:$ms1), "mmov.aa" , "$md, $ms1">;
+
+  let hasSideEffects = 1 in {
+    def MCFGK   : RVMCfgK <(outs GPR:$rd), (ins GPR:$rs1             ), "mcfgk"  , "$rd, $rs1">;
+    def MCFGM   : RVMCfgM <(outs GPR:$rd), (ins GPR:$rs1, uimm2:$imm2), "mcfgm"  , "$rd, $rs1, $imm2">;
+    def MCFGN   : RVMCfgN <(outs GPR:$rd), (ins GPR:$rs1, uimm2:$imm2), "mcfgn"  , "$rd, $rs1, $imm2">;
+    def MMAC_DT : RVMCfgDT<(outs),(ins uimm5:$immC, uimm5:$immA, uimm5:$immB), "mmac.dt", "$immC, $immA, $immB">;
   }
 
 }
