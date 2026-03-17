@@ -143,7 +143,6 @@ class RVMCfgBase<dag outs, dag ins, string opcodestr, string argstr>
 
   let Inst{31-29} = 0b011;
   let Inst{25}    = 0b0;
-  let Inst{9-7}   = 0b000;
 
   let Inst{6-0} = OPC_CUSTOM_0.Value;
 }
@@ -154,10 +153,11 @@ class RVMCfgK<dag outs, dag ins, string opcodestr, string argstr>
     bits<5> rd;
 
     let Inst{28-26} = 0b000;
-    let Inst{24-20} = rd ;
+    let Inst{24-20} = 0b00000;
     let Inst{19-15} = rs1;
     let Inst{14-13} = 0b00;
-    let Inst{12-10} = 0b000;
+    let Inst{12}    = 0b0;
+    let Inst{11-7}  = rd;
 }
 class RVMCfgM<dag outs, dag ins, string opcodestr, string argstr> 
   : RVMCfgBase<outs, ins, opcodestr, argstr> {
@@ -166,10 +166,11 @@ class RVMCfgM<dag outs, dag ins, string opcodestr, string argstr>
     bits<2> imm2;
 
     let Inst{28-26} = 0b001;
-    let Inst{24-20} = rd ;
+    let Inst{24-20} = 0b00000;
     let Inst{19-15} = rs1;
     let Inst{14-13} = imm2{1-0};
-    let Inst{12-10} = 0b000;
+    let Inst{12}    = 0b0;
+    let Inst{11-7}  = rd;
 }
 class RVMCfgN<dag outs, dag ins, string opcodestr, string argstr> 
   : RVMCfgBase<outs, ins, opcodestr, argstr> {
@@ -178,10 +179,11 @@ class RVMCfgN<dag outs, dag ins, string opcodestr, string argstr>
     bits<2> imm2;
 
     let Inst{28-26} = 0b010;
-    let Inst{24-20} = rd ;
+    let Inst{24-20} = 0b00000;
     let Inst{19-15} = rs1;
     let Inst{14-13} = imm2{1-0};
-    let Inst{12-10} = 0b000;
+    let Inst{12}    = 0b0;
+    let Inst{11-7}  = rd;
 }
 class RVMCfgDT<dag outs, dag ins, string opcodestr, string argstr> 
   : RVMCfgBase<outs, ins, opcodestr, argstr> {
@@ -193,6 +195,7 @@ class RVMCfgDT<dag outs, dag ins, string opcodestr, string argstr>
     let Inst{24-20} = Cimm5{4-0};
     let Inst{19-15} = Aimm5{4-0};
     let Inst{14-10} = Bimm5{4-0};
+    let Inst{9-7}   = 0b000;
 }
 
 let Predicates = [HasVendorXTHeadMatrix], DecoderNamespace = "XTHeadMatrix",hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
