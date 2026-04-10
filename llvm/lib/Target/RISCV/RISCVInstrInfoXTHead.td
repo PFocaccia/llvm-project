@@ -44,6 +44,7 @@ class RVMArithBase<dag outs, dag ins, string opcodestr, string argstr>
 
   let Inst{6-0} = OPC_CUSTOM_0.Value;
 }
+
 class RVMMACC<dag outs, dag ins, string opcodestr, string argstr>
     : RVMArithBase<outs, ins, opcodestr, argstr> {
   
@@ -225,4 +226,26 @@ let Predicates = [HasVendorXTHeadMatrix], DecoderNamespace = "XTHeadMatrix",hasS
     def MMAC_DT : RVMCfgDT<(outs),(ins uimm5:$immC, uimm5:$immA, uimm5:$immB), "mmac.dt", "$immC, $immA, $immB">;
   }
 
+}
+
+let Predicates = [HasVendorXTHeadMatrix] in {
+  def : Pat<(int_riscv_quadrilatero_mld_lhs GPR:$rs1, GPR:$rs2), (MLD_LHS GPR:$rs1, GPR:$rs2)>;
+  def : Pat<(int_riscv_quadrilatero_mld_rhs GPR:$rs1, GPR:$rs2), (MLD_RHS GPR:$rs1, GPR:$rs2)>;
+  
+  def : Pat<(int_riscv_quadrilatero_mst MR:$mds3, GPR:$rs1, GPR:$rs2), (MST MR:$mds3, GPR:$rs1, GPR:$rs2)>;
+
+  def : Pat<(int_riscv_quadrilatero_mmacc MR:$ms1, MR:$ms2), (MMACC MR:$ms1, MR:$ms2)>;
+  
+  def : Pat<(int_riscv_quadrilatero_mzero_m), (MZERO_M)>;
+  def : Pat<(int_riscv_quadrilatero_mzero_a), (MZERO_A)>;
+
+  def : Pat<(int_riscv_quadrilatero_mmov_mm MR:$ms1), (MMOV_MM MR:$ms1)>;
+  def : Pat<(int_riscv_quadrilatero_mmov_ma MR:$ms1), (MMOV_MA MR:$ms1)>;
+  def : Pat<(int_riscv_quadrilatero_mmov_am ACC:$ms1),(MMOV_AM ACC:$ms1)>;
+  def : Pat<(int_riscv_quadrilatero_mmov_aa ACC:$ms1),(MMOV_AA ACC:$ms1)>;
+
+  def : Pat<(int_riscv_quadrilatero_mcfgk GPR:$rs1), (MCFGK GPR:$rs1)>;
+    def : Pat<(int_riscv_quadrilatero_mcfgm GPR:$rs1, timm:$imm2), (MCFGM GPR:$rs1, timm:$imm2)>;
+    def : Pat<(int_riscv_quadrilatero_mcfgn GPR:$rs1, timm:$imm2), (MCFGN GPR:$rs1, timm:$imm2)>;
+    def : Pat<(int_riscv_quadrilatero_mmac_dt timm:$immC, timm:$immA, timm:$immB), (MMAC_DT timm:$immC, timm:$immA, timm:$immB)>;
 }

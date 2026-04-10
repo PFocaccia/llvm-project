@@ -2025,6 +2025,77 @@ let TargetPrefix = "riscv" in {
 } // TargetPrefix = "riscv"
 
 //===----------------------------------------------------------------------===//
+// Quadrilatero Matrix extension
+
+class RISCVQuadrilateroIntrinsic {
+}
+
+let TargetPrefix = "riscv" in {
+  def int_riscv_quadrilatero_mld_lhs
+      : Intrinsic<[llvm_i32_ty],
+                  [llvm_ptr_ty, llvm_anyint_ty],
+                  [IntrReadMem]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mld_rhs
+      : Intrinsic<[llvm_i32_ty],
+                  [llvm_ptr_ty, llvm_anyint_ty],
+                  [IntrReadMem]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mst
+      : Intrinsic<[],
+                  [llvm_i32_ty, llvm_ptr_ty, llvm_anyint_ty],
+                  [IntrWriteMem]>,
+        RISCVQuadrilateroIntrinsic;
+
+  def int_riscv_quadrilatero_mmacc
+      : Intrinsic<[llvm_i32_ty],
+                  [llvm_i32_ty, llvm_i32_ty],
+                  [IntrNoMem]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mzero_m
+      : Intrinsic<[llvm_i32_ty], [], [IntrNoMem]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mzero_a
+      : Intrinsic<[llvm_i32_ty], [], [IntrNoMem]>,
+        RISCVQuadrilateroIntrinsic;
+
+  def int_riscv_quadrilatero_mmov_mm
+      : Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mmov_ma
+      : Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mmov_am
+      : Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mmov_aa
+      : Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem]>,
+        RISCVQuadrilateroIntrinsic;
+
+  def int_riscv_quadrilatero_mcfgk
+      : Intrinsic<[llvm_anyint_ty],
+                  [LLVMMatchType<0>],
+                  [IntrNoMem, IntrHasSideEffects]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mcfgm
+      : Intrinsic<[llvm_anyint_ty],
+                  [LLVMMatchType<0>, llvm_i32_ty],
+                  [IntrNoMem, IntrHasSideEffects, ImmArg<ArgIndex<1>>]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mcfgn
+      : Intrinsic<[llvm_anyint_ty],
+                  [LLVMMatchType<0>, llvm_i32_ty],
+                  [IntrNoMem, IntrHasSideEffects, ImmArg<ArgIndex<1>>]>,
+        RISCVQuadrilateroIntrinsic;
+  def int_riscv_quadrilatero_mmac_dt
+      : Intrinsic<[],
+                  [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+                  [IntrNoMem, IntrHasSideEffects, ImmArg<ArgIndex<0>>,
+                   ImmArg<ArgIndex<1>>, ImmArg<ArgIndex<2>>]>,
+        RISCVQuadrilateroIntrinsic;
+} // TargetPrefix = "riscv"
+
+//===----------------------------------------------------------------------===//
 // Xfrep extension
 
 let TargetPrefix = "riscv" in {

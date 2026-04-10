@@ -250,6 +250,7 @@ public:
   bool hasExtXssr() const { return HasExtXssr; }
   bool hasExtXcopift() const { return HasExtXcopift; }
   bool hasExtXmempool() const { return HasExtXmempool; }
+  bool hasVendorXTHeadMatrix() const { return HasVendorXTHeadMatrix; }
   bool hasPULPExtV2() const { return HasPULPExtV2; }
   bool hasPULPExtHwloop() const { return HasPULPExtHwloop; }
   bool hasPULPExtPostmod() const { return HasPULPExtPostmod; }
