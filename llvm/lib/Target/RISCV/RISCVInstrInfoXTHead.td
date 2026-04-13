@@ -245,7 +245,7 @@ let Predicates = [HasVendorXTHeadMatrix] in {
   def : Pat<(int_riscv_quadrilatero_mmov_aa ACC:$ms1),(MMOV_AA ACC:$ms1)>;
 
   def : Pat<(int_riscv_quadrilatero_mcfgk GPR:$rs1), (MCFGK GPR:$rs1)>;
-    def : Pat<(int_riscv_quadrilatero_mcfgm GPR:$rs1, timm:$imm2), (MCFGM GPR:$rs1, timm:$imm2)>;
-    def : Pat<(int_riscv_quadrilatero_mcfgn GPR:$rs1, timm:$imm2), (MCFGN GPR:$rs1, timm:$imm2)>;
-    def : Pat<(int_riscv_quadrilatero_mmac_dt timm:$immC, timm:$immA, timm:$immB), (MMAC_DT timm:$immC, timm:$immA, timm:$immB)>;
+  def : Pat<(int_riscv_quadrilatero_mcfgm GPR:$rs1, timm:$imm2), (MCFGM GPR:$rs1, timm:$imm2)>;
+  def : Pat<(int_riscv_quadrilatero_mcfgn GPR:$rs1, timm:$imm2), (MCFGN GPR:$rs1, timm:$imm2)>;
+  def : Pat<(int_riscv_quadrilatero_mmac_dt timm:$immC, timm:$immA, timm:$immB), (MMAC_DT timm:$immC, timm:$immA, timm:$immB)>;
 }

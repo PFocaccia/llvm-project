@@ -40,6 +40,7 @@ add_mlir_translation_library(MLIRToLLVMIRTranslationRegistration
   MLIRArmNeonToLLVMIRTranslation
   MLIRArmSVEToLLVMIRTranslation
   MLIRAMXToLLVMIRTranslation
+  MLIRQuadrilateroToLLVMIRTranslation
   MLIRX86VectorToLLVMIRTranslation
   MLIRLLVMToLLVMIRTranslation
   MLIRNVVMToLLVMIRTranslation

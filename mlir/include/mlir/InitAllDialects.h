@@ -40,6 +40,7 @@
 #include "mlir/Dialect/PDL/IR/PDL.h"
 #include "mlir/Dialect/PDLInterp/IR/PDLInterp.h"
 #include "mlir/Dialect/Quant/QuantOps.h"
+#include "mlir/Dialect/Quadrilatero/QuadrilateroDialect.h"
 #include "mlir/Dialect/SCF/BufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVDialect.h"
@@ -82,6 +83,7 @@ inline void registerAllDialects(DialectRegistry &registry) {
                   pdl::PDLDialect,
                   pdl_interp::PDLInterpDialect,
                   quant::QuantizationDialect,
+                  quadrilatero::QuadrilateroDialect,
                   spirv::SPIRVDialect,
                   arm_sve::ArmSVEDialect,
                   vector::VectorDialect,
