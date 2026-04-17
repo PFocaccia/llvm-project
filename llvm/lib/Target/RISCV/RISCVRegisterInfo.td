@@ -620,11 +620,10 @@ def AnyReg : RegisterClass<"RISCV", [untyped], 32,
 }
 
 // Matrices 
-// borrowed from tile definition in X86RegisterInfo.td
-let CopyCost = -1 in // Don't allow copying of matrix registers
-def MR : RegisterClass<"RISCV", [i32], 2048,
+let CopyCost = -1 in 
+def MR : RegisterClass<"RISCV", [v16i32, v16f32, v32i16, v32f16, v64i8], 512,
                          (sequence "M%u", 0, 15)> {
-    let Size = 2048;
+    let Size = 512;
     let DecoderMethod = "DecodeMRRegisterClass";
 }
 
@@ -648,10 +647,10 @@ let RegAltNameIndices = [ABIRegAltName] in {
 }
 
 // Accumulators
-let CopyCost = -1 in // Don't allow copying of matrix registers
-def ACC : RegisterClass<"RISCV", [i32], 2048,
+let CopyCost = -1 in 
+def ACC : RegisterClass<"RISCV", [v16i32, v16f32], 512,
                          (sequence "ACC%u", 0, 3)> {
-    let Size = 2048;
+    let Size = 512;
     let DecoderMethod = "DecodeACCRegisterClass";
 }
 

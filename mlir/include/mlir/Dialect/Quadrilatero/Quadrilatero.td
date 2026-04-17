@@ -168,8 +168,19 @@ def McfgnOp : Quadrilatero_Op<"mcfgn", [AllTypesMatch<["rs1", "res"]>]> {
 
 def MmacDtOp : Quadrilatero_Op<"mmac_dt"> {
   let summary = "matrix mac data types";
-  let arguments = (ins I32Attr:$immC, I32Attr:$immA, I32Attr:$immB);
-  let assemblyFormat = "$immC `,` $immA `,` $immB attr-dict";
+  let arguments = (ins I32Attr:$dtC, I32Attr:$dtA, I32Attr:$dtB);
+  let assemblyFormat = "$dtC `,` $dtA `,` $dtB attr-dict";
+}
+
+def TcdmMatmulOp : Quadrilatero_Op<"tcdm_matmul"> {
+  let summary = "highly optimized TCDM matmul micro-kernel";
+  let arguments = (ins Arg<LLVM_AnyPointer, "A base", [MemRead]>:$addrA,
+                       Arg<LLVM_AnyPointer, "B base", [MemRead]>:$addrB,
+                       Arg<LLVM_AnyPointer, "C base", [MemWrite]>:$addrC,
+                       AnyInteger:$m, AnyInteger:$n, AnyInteger:$k,
+                       AnyInteger:$shift,
+                       I32Attr:$dtC, I32Attr:$dtA, I32Attr:$dtB);
+  let assemblyFormat = "operands attr-dict `:` type(operands)";
 }
 
 #endif // QUADRILATERO

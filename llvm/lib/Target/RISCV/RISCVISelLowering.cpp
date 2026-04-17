@@ -98,6 +98,17 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
     addRegisterClass(MVT::v4i8, &RISCV::PulpV4RegClass);
   }
 
+  if (Subtarget.hasVendorXTHeadMatrix()) {
+    addRegisterClass(MVT::v16i32, &RISCV::MRRegClass);
+    addRegisterClass(MVT::v16f32, &RISCV::MRRegClass);
+    addRegisterClass(MVT::v32i16, &RISCV::MRRegClass);
+    addRegisterClass(MVT::v32f16, &RISCV::MRRegClass);
+    addRegisterClass(MVT::v64i8, &RISCV::MRRegClass);
+
+    addRegisterClass(MVT::v16i32, &RISCV::ACCRegClass);
+    addRegisterClass(MVT::v16f32, &RISCV::ACCRegClass);
+  }
+
   static const MVT::SimpleValueType BoolVecVTs[] = {
       MVT::nxv1i1,  MVT::nxv2i1,  MVT::nxv4i1, MVT::nxv8i1,
       MVT::nxv16i1, MVT::nxv32i1, MVT::nxv64i1};

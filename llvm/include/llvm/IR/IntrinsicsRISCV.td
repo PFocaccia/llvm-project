@@ -2032,44 +2032,44 @@ class RISCVQuadrilateroIntrinsic {
 
 let TargetPrefix = "riscv" in {
   def int_riscv_quadrilatero_mld_lhs
-      : Intrinsic<[llvm_i32_ty],
+      : Intrinsic<[llvm_v16i32_ty],
                   [llvm_ptr_ty, llvm_anyint_ty],
                   [IntrReadMem]>,
         RISCVQuadrilateroIntrinsic;
   def int_riscv_quadrilatero_mld_rhs
-      : Intrinsic<[llvm_i32_ty],
+      : Intrinsic<[llvm_v16i32_ty],
                   [llvm_ptr_ty, llvm_anyint_ty],
                   [IntrReadMem]>,
         RISCVQuadrilateroIntrinsic;
   def int_riscv_quadrilatero_mst
       : Intrinsic<[],
-                  [llvm_i32_ty, llvm_ptr_ty, llvm_anyint_ty],
+                  [llvm_v16i32_ty, llvm_ptr_ty, llvm_anyint_ty],
                   [IntrWriteMem]>,
         RISCVQuadrilateroIntrinsic;
 
   def int_riscv_quadrilatero_mmacc
-      : Intrinsic<[llvm_i32_ty],
-                  [llvm_i32_ty, llvm_i32_ty],
+      : Intrinsic<[llvm_v16i32_ty],
+                  [llvm_v16i32_ty, llvm_v16i32_ty],
                   [IntrNoMem]>,
         RISCVQuadrilateroIntrinsic;
   def int_riscv_quadrilatero_mzero_m
-      : Intrinsic<[llvm_i32_ty], [], [IntrNoMem]>,
+      : Intrinsic<[llvm_v16i32_ty], [], [IntrNoMem]>,
         RISCVQuadrilateroIntrinsic;
   def int_riscv_quadrilatero_mzero_a
-      : Intrinsic<[llvm_i32_ty], [], [IntrNoMem]>,
+      : Intrinsic<[llvm_v16i32_ty], [], [IntrNoMem]>,
         RISCVQuadrilateroIntrinsic;
 
   def int_riscv_quadrilatero_mmov_mm
-      : Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem]>,
+      : Intrinsic<[llvm_v16i32_ty], [llvm_v16i32_ty], [IntrNoMem]>,
         RISCVQuadrilateroIntrinsic;
   def int_riscv_quadrilatero_mmov_ma
-      : Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem]>,
+      : Intrinsic<[llvm_v16i32_ty], [llvm_v16i32_ty], [IntrNoMem]>,
         RISCVQuadrilateroIntrinsic;
   def int_riscv_quadrilatero_mmov_am
-      : Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem]>,
+      : Intrinsic<[llvm_v16i32_ty], [llvm_v16i32_ty], [IntrNoMem]>,
         RISCVQuadrilateroIntrinsic;
   def int_riscv_quadrilatero_mmov_aa
-      : Intrinsic<[llvm_i32_ty], [llvm_i32_ty], [IntrNoMem]>,
+      : Intrinsic<[llvm_v16i32_ty], [llvm_v16i32_ty], [IntrNoMem]>,
         RISCVQuadrilateroIntrinsic;
 
   def int_riscv_quadrilatero_mcfgk
