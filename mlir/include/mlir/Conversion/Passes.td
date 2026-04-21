@@ -492,6 +492,23 @@ def ConvertMemRefToLLVM : Pass<"convert-memref-to-llvm", "ModuleOp"> {
 }
 
 //===----------------------------------------------------------------------===//
+// SnitchMemoryToLLVM
+//===----------------------------------------------------------------------===//
+
+def ConvertSnitchMemoryToLLVM : Pass<"convert-snitch-memory-to-llvm", "ModuleOp"> {
+  let summary = "Convert Snitch memory-related MemRef ops to LLVM dialect";
+  let constructor = "mlir::createConvertSnitchMemoryToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
+  let options = [
+    Option<"l1MemorySpace", "l1-memory-space", "unsigned", /*default=*/"1",
+           "Memory space id used to identify L1/TCDM memrefs">,
+    Option<"indexBitwidth", "index-bitwidth", "unsigned",
+           /*default=kDeriveIndexBitwidthFromDataLayout*/"0",
+           "Bitwidth of the index type, 0 to use size of machine word">,
+  ];
+}
+
+//===----------------------------------------------------------------------===//
 // MemRefToSPIRV
 //===----------------------------------------------------------------------===//
 

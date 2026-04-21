@@ -22,6 +22,7 @@ void populateMemRefToLLVMConversionPatterns(LLVMTypeConverter &converter,
                                             RewritePatternSet &patterns);
 
 std::unique_ptr<Pass> createMemRefToLLVMPass();
+std::unique_ptr<Pass> createConvertSnitchMemoryToLLVMPass();
 } // namespace mlir
 
 #endif // MLIR_CONVERSION_MEMREFTOLLVM_MEMREFTOLLVM_H
