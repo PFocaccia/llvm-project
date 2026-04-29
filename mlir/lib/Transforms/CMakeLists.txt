@@ -7,6 +7,8 @@ add_mlir_library(MLIRTransforms
   Inliner.cpp
   LocationSnapshot.cpp
   LoopInvariantCodeMotion.cpp
+  LowerLinalgMatmulToQuadrilatero.cpp
+  LowerSpatzMatrixAdd.cpp
   OpStats.cpp
   SCCP.cpp
   StripDebugInfo.cpp
@@ -22,9 +24,16 @@ add_mlir_library(MLIRTransforms
 
   LINK_LIBS PUBLIC
   MLIRAnalysis
+  MLIRArithmetic
   MLIRCopyOpInterface
+  MLIRFunc
+  MLIRLinalg
   MLIRLoopLikeInterface
+  MLIRMemRef
   MLIRPass
+  MLIRQuadrilatero
+  MLIRSpatz
+  MLIRSCF
   MLIRSupport
   MLIRTransformUtils
   )

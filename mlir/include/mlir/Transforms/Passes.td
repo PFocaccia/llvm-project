@@ -232,6 +232,56 @@ def SymbolPrivatize : Pass<"symbol-privatize"> {
   let constructor = "mlir::createSymbolPrivatizePass()";
 }
 
+  def LowerLinalgMatmulToQuadrilatero
+      : Pass<"lower-linalg-matmul-to-quadrilatero", "func::FuncOp"> {
+    let summary = "Lower linalg.matmul to Quadrilatero TCDM tiling";
+    let constructor = "mlir::createLowerLinalgMatmulToQuadrilateroPass()";
+    let dependentDialects = [
+      "arith::ArithmeticDialect",
+      "func::FuncDialect",
+      "linalg::LinalgDialect",
+      "memref::MemRefDialect",
+      "quadrilatero::QuadrilateroDialect",
+      "spatz::SpatzDialect",
+      "scf::SCFDialect",
+      "vector::VectorDialect"
+    ];
+    let options = [
+      Option<"tcdmBytes", "tcdm-bytes", "int64_t", /*default=*/"131072",
+        "Total TCDM size in bytes">,
+      Option<"tileM", "tile-m", "int64_t", /*default=*/"0",
+        "Tile size for M dimension (0 = auto)">,
+      Option<"tileN", "tile-n", "int64_t", /*default=*/"0",
+        "Tile size for N dimension (0 = auto)">,
+      Option<"tileK", "tile-k", "int64_t", /*default=*/"0",
+        "Tile size for K dimension (0 = auto)">,
+      Option<"l1MemorySpace", "l1-memory-space", "unsigned",
+        /*default=*/"1",
+        "Memory space id used to identify L1/TCDM memrefs">,
+      Option<"shift", "shift", "int64_t", /*default=*/"0",
+        "Shift argument for the TCDM kernel">,
+      Option<"dtC", "dtc", "int32_t", /*default=*/"3",
+        "Quadrilatero C datatype selector">,
+      Option<"dtA", "dta", "int32_t", /*default=*/"1",
+        "Quadrilatero A datatype selector">,
+      Option<"dtB", "dtb", "int32_t", /*default=*/"0",
+        "Quadrilatero B datatype selector">
+    ];
+  }
+
+  def LowerSpatzMatrixAdd
+      : Pass<"lower-spatz-matrix-add", "func::FuncOp"> {
+    let summary = "Lower spatz.matrix_add to loops with Spatz VLE/VSE";
+    let constructor = "mlir::createLowerSpatzMatrixAddPass()";
+    let dependentDialects = [
+      "arith::ArithmeticDialect",
+      "func::FuncDialect",
+      "memref::MemRefDialect",
+      "scf::SCFDialect",
+      "spatz::SpatzDialect"
+    ];
+  }
+
 def ViewOpGraph : Pass<"view-op-graph"> {
   let summary = "Print Graphviz visualization of an operation";
   let description = [{

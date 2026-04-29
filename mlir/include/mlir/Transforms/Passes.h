@@ -15,6 +15,14 @@
 #define MLIR_TRANSFORMS_PASSES_H
 
 #include "mlir/Pass/Pass.h"
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Quadrilatero/QuadrilateroDialect.h"
+#include "mlir/Dialect/SCF/SCF.h"
+#include "mlir/Dialect/Spatz/SpatzDialect.h"
+#include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Transforms/LocationSnapshot.h"
 #include "mlir/Transforms/ViewOpGraph.h"
 #include "llvm/Support/Debug.h"
@@ -78,6 +86,11 @@ createInlinerPass(llvm::StringMap<OpPassManager> opPipelines);
 std::unique_ptr<Pass>
 createInlinerPass(llvm::StringMap<OpPassManager> opPipelines,
                   std::function<void(OpPassManager &)> defaultPipelineBuilder);
+
+/// Creates a pass to lower linalg.matmul to Quadrilatero TCDM tiling.
+std::unique_ptr<Pass> createLowerLinalgMatmulToQuadrilateroPass();
+
+std::unique_ptr<Pass> createLowerSpatzMatrixAddPass();
 
 /// Creates a pass which performs sparse conditional constant propagation over
 /// nested operations.

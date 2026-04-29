@@ -18,5 +18,6 @@ add_mlir_conversion_library(MLIRMemRefToLLVM
   MLIRLLVMCommonConversion
   MLIRMemRef
   MLIRLLVMIR
+  MLIRSpatz
   MLIRTransforms
   )

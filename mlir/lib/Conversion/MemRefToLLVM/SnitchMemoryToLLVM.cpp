@@ -67,16 +67,16 @@ struct SnitchL1AllocOpLowering : public AllocLikeOpLLVMLowering {
   }
 };
 
-struct SnitchL1DeallocOpLowering
-    : public ConvertOpToLLVMPattern<memref::DeallocOp> {
+struct SnitchL1DeallocOpLowering : public ConvertOpToLLVMPattern<memref::DeallocOp> {
+  
   using ConvertOpToLLVMPattern<memref::DeallocOp>::ConvertOpToLLVMPattern;
 
   LogicalResult
-  matchAndRewrite(memref::DeallocOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
+  matchAndRewrite(memref::DeallocOp op, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const override {
     rewriter.eraseOp(op);
     return success();
   }
+  
 };
 
 struct SnitchSdmaTwodCopyOpLowering : public ConvertOpToLLVMPattern<memref::CopyOp> {
@@ -177,7 +177,7 @@ struct ConvertSnitchMemoryToLLVMPass : public ConvertSnitchMemoryToLLVMBase<Conv
     patterns.add<SnitchL1AllocOpLowering>(typeConverter);
     patterns.add<SnitchL1DeallocOpLowering>(typeConverter);
     patterns.add<SnitchSdmaTwodCopyOpLowering>(typeConverter, l1MemorySpace);
-
+    
     LLVMConversionTarget target(getContext());
     target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
 

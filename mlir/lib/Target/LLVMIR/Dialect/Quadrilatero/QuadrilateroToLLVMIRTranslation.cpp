@@ -208,31 +208,67 @@ public:
       asmOperands.push_back(a);
       asmOperands.push_back(b);
 
+      auto toI8Ptr = [&](llvm::Value *value) -> llvm::Value * {
+        auto *ptrTy = llvm::cast<llvm::PointerType>(value->getType());
+        auto *i8Ty = llvm::Type::getInt8Ty(builder.getContext());
+        auto *i8PtrTy = llvm::PointerType::get(i8Ty, ptrTy->getAddressSpace());
+        return builder.CreateBitCast(value, i8PtrTy);
+      };
+
+      asmOperands[0] = toI8Ptr(asmOperands[0]);
+      asmOperands[1] = toI8Ptr(asmOperands[1]);
+      asmOperands[2] = toI8Ptr(asmOperands[2]);
+
       SmallVector<llvm::Type *, 10> asmTypes;
       asmTypes.reserve(asmOperands.size());
       for (llvm::Value *value : asmOperands)
         asmTypes.push_back(value->getType());
 
       auto *fnTy = llvm::FunctionType::get(builder.getVoidTy(), asmTypes, false);
+      
       auto asmString =
+          "addi sp, sp, -64\n\t"
+          "sw s0, 0(sp)\n\t"
+          "sw s1, 4(sp)\n\t"
+          "sw s2, 8(sp)\n\t"
+          "sw s3, 12(sp)\n\t"
+          "sw s4, 16(sp)\n\t"
+          "sw s5, 20(sp)\n\t"
+          "sw s6, 24(sp)\n\t"
+          "sw s7, 28(sp)\n\t"
+          "sw s8, 32(sp)\n\t"
+          "sw s9, 36(sp)\n\t"
+          "sw s10, 40(sp)\n\t"
+          "sw s11, 44(sp)\n\t"
+          
+          // 2. SALVA I PARAMETRI CRITICI SULLO STACK PRIMA CHE VENGANO DISTRUTTI
+          "sw $1, 48(sp)\n\t"
+          "sw $4, 52(sp)\n\t"
+          "sw $5, 56(sp)\n\t"
+          
           "mmac.dt $7, $8, $9\n\t"
           "add t0, x0, $3\n\t"
           "add s0, x0, $2\n\t"
           "add s1, x0, $0\n\t"
-          "sll s10, $3, $6\n\t"
-          "sll s11, $4, $6\n\t"
-          "slli a6, $4, 2\n\t"
+          "li s10, 256\n\t"  // Stride matrice A
+          "li s11, 256\n\t"  // Stride matrice B
+          "li a6,  256\n\t"  // Stride matrice C
           "1:\n\t"
           "mcfgm t3, t0, 1\n\t"
-          "add t1, x0, $4\n\t"
+          
+          // INIZIO CICLO 1: Pesca $4 e $1 dallo stack invece che dai registri
+          "lw t1, 52(sp)\n\t"   
           "add s2, x0, s0\n\t"
-          "add s3, x0, $1\n\t"
+          "lw s3, 48(sp)\n\t"   
           "2:\n\t"
           "mcfgn t4, t1, 1\n\t"
           "mzero.a acc0\n\t"
-          "add t2, x0, $5\n\t"
+          
+          // INIZIO CICLO 2: Pesca $5 dallo stack
+          "lw t2, 56(sp)\n\t"   
           "add s4, x0, s1\n\t"
           "add s5, x0, s3\n\t"
+          
           "3:\n\t"
           "mcfgk t5, t2\n\t"
           "mld.lhs m0, (s4), s10\n\t"
@@ -254,6 +290,7 @@ public:
           "add s5, s5, s9\n\t"
           "sub t2, t2, t6\n\t"
           "bgtz t2, 3b\n\t"
+          
           "mmov.am m8, acc0\n\t"
           "slli t6, t4, 2\n\t"
           "add s3, s3, t6\n\t"
@@ -261,18 +298,33 @@ public:
           "mst m8, (s2), a6\n\t"
           "add s2, s2, t6\n\t"
           "bgtz t1, 2b\n\t"
+          
           "mul t6, t3, a6\n\t"
           "add s0, s0, t6\n\t"
           "slli t6, t3, 2\n\t"
           "add s1, s1, t6\n\t"
           "sub t0, t0, t3\n\t"
-          "bgtz t0, 1b";
+          "bgtz t0, 1b\n\t"
+          
+          // 3. Ripristina i registri S e dealloca i 64 byte
+          "lw s0, 0(sp)\n\t"
+          "lw s1, 4(sp)\n\t"
+          "lw s2, 8(sp)\n\t"
+          "lw s3, 12(sp)\n\t"
+          "lw s4, 16(sp)\n\t"
+          "lw s5, 20(sp)\n\t"
+          "lw s6, 24(sp)\n\t"
+          "lw s7, 28(sp)\n\t"
+          "lw s8, 32(sp)\n\t"
+          "lw s9, 36(sp)\n\t"
+          "lw s10, 40(sp)\n\t"
+          "lw s11, 44(sp)\n\t"
+          "addi sp, sp, 64";
 
       auto constraints =
           "r,r,r,r,r,r,r,i,i,i,"
           "~{t0},~{t1},~{t2},~{t3},~{t4},~{t5},~{t6},"
-          "~{s0},~{s1},~{s2},~{s3},~{s4},~{s5},~{s6},~{s7},"
-          "~{s8},~{s9},~{s10},~{s11},~{a6},~{memory}";
+          "~{a6},~{memory}";
 
       auto *inlineAsm = llvm::InlineAsm::get(fnTy, asmString, constraints, /*hasSideEffects=*/true, /*isAlignStack=*/false);
       builder.CreateCall(inlineAsm, asmOperands);

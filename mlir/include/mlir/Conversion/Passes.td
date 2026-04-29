@@ -509,6 +509,30 @@ def ConvertSnitchMemoryToLLVM : Pass<"convert-snitch-memory-to-llvm", "ModuleOp"
 }
 
 //===----------------------------------------------------------------------===//
+// QuadrilateroToLLVM
+//===----------------------------------------------------------------------===//
+
+def ConvertQuadrilateroToLLVM : Pass<"convert-quadrilatero-to-llvm"> {
+  let summary = "Lower Quadrilatero MemRef operations to LLVM pointers";
+  let constructor = "mlir::createConvertQuadrilateroToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// SpatzToLLVM
+//===----------------------------------------------------------------------===//
+
+def ConvertSpatzToLLVM : Pass<"convert-spatz-to-llvm"> {
+  let summary = "Lower Spatz memory operations to LLVM pointers";
+  let description = [{
+    This pass converts Spatz VLE and VSE operations taking MemRefs
+    into equivalent operations taking LLVM pointers.
+  }];
+  let constructor = "mlir::createConvertSpatzToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
+}
+
+//===----------------------------------------------------------------------===//
 // MemRefToSPIRV
 //===----------------------------------------------------------------------===//
 

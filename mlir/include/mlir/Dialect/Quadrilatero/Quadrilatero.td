@@ -183,4 +183,14 @@ def TcdmMatmulOp : Quadrilatero_Op<"tcdm_matmul"> {
   let assemblyFormat = "operands attr-dict `:` type(operands)";
 }
 
+def TcdmMatmulMemRefOp : Quadrilatero_Op<"tcdm_matmul_memref"> {
+  let summary = "TCDM matmul micro-kernel on memrefs";
+  let arguments = (ins Arg<AnyMemRef, "A tile", [MemRead]>:$a,
+                       Arg<AnyMemRef, "B tile", [MemRead]>:$b,
+                       Arg<AnyMemRef, "C tile", [MemWrite]>:$c,
+                       Index:$m, Index:$n, Index:$k, Index:$shift,
+                       I32Attr:$dtC, I32Attr:$dtA, I32Attr:$dtB);
+  let assemblyFormat = "$a `,` $b `,` $c `,` $m `,` $n `,` $k `,` $shift attr-dict `:` type($a) `,` type($b) `,` type($c) `,` type($m) `,` type($n) `,` type($k) `,` type($shift)";
+}
+
 #endif // QUADRILATERO
