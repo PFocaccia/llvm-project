@@ -39,3 +39,13 @@ To generate the object file: `clang --target=riscv32 -Xclang -target-feature -Xc
 ## Explore obj file
 
 `llvm-objdump -d --mattr=+experimental-xtheadmatrix helloworld.o`
+
+## Quadrilatero-Spatz MLIR pipeline
+
+```
+mlir-opt mat_mul.mlir -canonicalize -lower-linalg-matmul-to-quadrilatero -lower-spatz-matrix-add -convert-linalg-to-loops -convert-scf-to-cf -convert-spatz-to-llvm -convert-snitch-memory-to-llvm -convert-quadrilatero-to-llvm -convert-math-to-llvm -convert-arith-to-llvm -convert-memref-to-llvm -convert-func-to-llvm -convert-cf-to-llvm -reconcile-unrealized-casts > MatMul.mlir
+
+mlir-translate --mlir-to-llvmir MatMul.mlir -o MatMul.ll
+
+llc -march=riscv32 -mattr=+m,+f,+v,+xdma,+experimental-xtheadmatrix -riscv-v-vector-bits-min=2048 MatMul.ll -o MatMul.s
+```
