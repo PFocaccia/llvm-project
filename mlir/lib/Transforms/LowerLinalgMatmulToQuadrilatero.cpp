@@ -66,6 +66,7 @@ static Value createSubview2D(OpBuilder &builder, Location loc, Value base, Value
 
 }
 
+
 struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilateroBase<LowerLinalgMatmulToQuadrilateroPass> {
   
   LowerLinalgMatmulToQuadrilateroPass() = default;
@@ -83,8 +84,8 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
   }
 
   LogicalResult lowerMatmul(linalg::MatmulOp op) {
-    if (op.getNumInputs() != 2 || op.getNumOutputs() != 1)
-      return failure();
+
+    if (op.getNumInputs() != 2 || op.getNumOutputs() != 1) return failure();
 
     Value a = op.inputs()[0];
     Value b = op.inputs()[1];
@@ -108,10 +109,24 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
       op.emitError("Data type not supported by Quadrilatero");
       return failure();
     }
+
+    unsigned bitWidth = aElemType.getIntOrFloatBitWidth();
+    int64_t shift_amount = 0;
+    int64_t tileKVal = 0;
+    
+    if (bitWidth == 32) {
+      shift_amount = 0; tileKVal = 64;
+    } else if (bitWidth == 16) {
+      shift_amount = 1; tileKVal = 128; 
+    } else if (bitWidth == 8) {
+      shift_amount = 2; tileKVal = 256; 
+    } else {
+      op.emitError("Bit width not supported");
+      return failure();
+    }
   
     int64_t tileMVal = 64;
     int64_t tileNVal = 64;
-    int64_t tileKVal = 64;
 
     OpBuilder builder(op);
     Location loc = op.getLoc();
@@ -133,25 +148,9 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     Value cTmp = builder.create<memref::AllocOp>(loc, cTmpType);
 
     Value c0 = builder.create<arith::ConstantIndexOp>(loc, 0);
-    Value c1 = builder.create<arith::ConstantIndexOp>(loc, 1);
     Value tileM_val = builder.create<arith::ConstantIndexOp>(loc, tileMVal);
     Value tileN_val = builder.create<arith::ConstantIndexOp>(loc, tileNVal);
     Value tileK_val = builder.create<arith::ConstantIndexOp>(loc, tileKVal);
-
-    unsigned bitWidth = aElemType.getIntOrFloatBitWidth();
-    int64_t shift_amount = 0;
-    
-    if (bitWidth == 32) {
-      shift_amount = 2; // 32-bit -> 4 byte -> shift di 2
-    } else if (bitWidth == 16) {
-      shift_amount = 1; // 16-bit -> 2 byte -> shift di 1
-    } else if (bitWidth == 8) {
-      shift_amount = 0; // 8-bit  -> 1 byte -> shift di 0
-    } else {
-      op.emitError("Bit width not supported");
-      return failure();
-    }
-
     Value shiftVal = builder.create<arith::ConstantIndexOp>(loc, shift_amount);
 
     Value dimK = builder.create<memref::DimOp>(loc, a, 0); 
@@ -188,19 +187,11 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
                 Value remK = kBuilder.create<arith::SubIOp>(kLoc, dimK, k);
                 Value kEff = createMinIndex(kBuilder, kLoc, remK, tileK_val);
 
-                Value aSub = createSubview2D(kBuilder, kLoc, a, k, i, kEff, mEff,
-                                             aElemType, aType.getMemorySpace());
-
-                Value bSub = createSubview2D(kBuilder, kLoc, b, k, j, kEff, nEff,
-                                             bElemType, bType.getMemorySpace());
-
-                Value aL1Sub = createSubview2D(kBuilder, kLoc, aL1, c0, c0, kEff, mEff,
-                                               aElemType, l1SpaceAttr);
-                
-                Value bL1Sub = createSubview2D(kBuilder, kLoc, bL1, c0, c0, kEff, nEff,
-                                               bElemType, l1SpaceAttr);
-                Value cTmpSub = createSubview2D(kBuilder, kLoc, cTmp, c0, c0, mEff, nEff,
-                                                cElemType, l1SpaceAttr);
+                Value aSub =    createSubview2D(kBuilder, kLoc, a, k, i, kEff, mEff, aElemType, aType.getMemorySpace());
+                Value bSub =    createSubview2D(kBuilder, kLoc, b, k, j, kEff, nEff, bElemType, bType.getMemorySpace());
+                Value aL1Sub =  createSubview2D(kBuilder, kLoc, aL1, c0, c0, kEff, mEff, aElemType, l1SpaceAttr);
+                Value bL1Sub =  createSubview2D(kBuilder, kLoc, bL1, c0, c0, kEff, nEff, bElemType, l1SpaceAttr);
+                Value cTmpSub = createSubview2D(kBuilder, kLoc, cTmp, c0, c0, mEff, nEff, cElemType, l1SpaceAttr);
 
                 kBuilder.create<memref::CopyOp>(kLoc, aSub, aL1Sub);
                 kBuilder.create<memref::CopyOp>(kLoc, bSub, bL1Sub);

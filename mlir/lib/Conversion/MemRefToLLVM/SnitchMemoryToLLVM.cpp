@@ -129,6 +129,43 @@ struct SnitchSdmaTwodCopyOpLowering : public ConvertOpToLLVMPattern<memref::Copy
     Value nReps32 =         castIntToWidth(rewriter, loc, nReps, 32);
 
     auto i32Ty = IntegerType::get(rewriter.getContext(), 32);
+
+    unsigned bitWidth = srcType.getElementType().getIntOrFloatBitWidth();
+    
+    if (bitWidth < 32) {
+        
+        unsigned shift = (bitWidth == 16) ? 1 : 2;
+        unsigned multiplier = 1 << shift;
+        
+        Value shiftVal = rewriter.create<LLVM::ConstantOp>(loc, i32Ty, rewriter.getIntegerAttr(i32Ty, shift));
+        Value multVal =  rewriter.create<LLVM::ConstantOp>(loc, i32Ty, rewriter.getIntegerAttr(i32Ty, multiplier));
+        Value epsVal =   rewriter.create<LLVM::ConstantOp>(loc, i32Ty, rewriter.getIntegerAttr(i32Ty, multiplier - 1));
+
+        Value nRepsPlusEps = rewriter.create<LLVM::AddOp>(loc, nReps32, epsVal);
+        nReps32 = rewriter.create<LLVM::LShrOp>(loc, nRepsPlusEps, shiftVal);
+        
+        size32 = rewriter.create<LLVM::MulOp>(loc, size32, multVal);
+        srcStride32 = rewriter.create<LLVM::MulOp>(loc, srcStride32, multVal);
+        dstStride32 = rewriter.create<LLVM::MulOp>(loc, dstStride32, multVal);
+        
+        auto indexTy = srcOffset.getType();
+        Value srcHorizElems = rewriter.create<LLVM::URemOp>(loc, srcOffset, srcStrideElems);
+        Value dstHorizElems = rewriter.create<LLVM::URemOp>(loc, dstOffset, dstStrideElems);
+        
+        Value multMinusOne = rewriter.create<LLVM::ConstantOp>(loc, indexTy, rewriter.getIntegerAttr(indexTy, multiplier - 1));
+        Value srcExtraElems = rewriter.create<LLVM::MulOp>(loc, srcHorizElems, multMinusOne);
+        Value dstExtraElems = rewriter.create<LLVM::MulOp>(loc, dstHorizElems, multMinusOne);
+        
+        Value srcExtraBytes = rewriter.create<LLVM::MulOp>(loc, srcExtraElems, elemSizeIdx);
+        Value dstExtraBytes = rewriter.create<LLVM::MulOp>(loc, dstExtraElems, elemSizeIdx);
+        
+        Value srcExtraBytes64 = castIntToWidth(rewriter, loc, srcExtraBytes, 64);
+        Value dstExtraBytes64 = castIntToWidth(rewriter, loc, dstExtraBytes, 64);
+        
+        srcAddr64 = rewriter.create<LLVM::AddOp>(loc, srcAddr64, srcExtraBytes64);
+        dstAddr64 = rewriter.create<LLVM::AddOp>(loc, dstAddr64, dstExtraBytes64);
+    }
+
     auto i64Ty = IntegerType::get(rewriter.getContext(), 64);
     Value cfg32 = rewriter.create<LLVM::ConstantOp>(loc, i32Ty, rewriter.getIntegerAttr(i32Ty, 0));
 

@@ -227,104 +227,81 @@ public:
       auto *fnTy = llvm::FunctionType::get(builder.getVoidTy(), asmTypes, false);
       
       auto asmString =
-          "addi sp, sp, -64\n\t"
-          "sw s0, 0(sp)\n\t"
-          "sw s1, 4(sp)\n\t"
-          "sw s2, 8(sp)\n\t"
-          "sw s3, 12(sp)\n\t"
-          "sw s4, 16(sp)\n\t"
-          "sw s5, 20(sp)\n\t"
-          "sw s6, 24(sp)\n\t"
-          "sw s7, 28(sp)\n\t"
-          "sw s8, 32(sp)\n\t"
-          "sw s9, 36(sp)\n\t"
-          "sw s10, 40(sp)\n\t"
-          "sw s11, 44(sp)\n\t"
-          
-          // 2. SALVA I PARAMETRI CRITICI SULLO STACK PRIMA CHE VENGANO DISTRUTTI
-          "sw $1, 48(sp)\n\t"
-          "sw $4, 52(sp)\n\t"
-          "sw $5, 56(sp)\n\t"
-          
           "mmac.dt $7, $8, $9\n\t"
-          "add t0, x0, $3\n\t"
-          "add s0, x0, $2\n\t"
-          "add s1, x0, $0\n\t"
-          "li s10, 256\n\t"  // Stride matrice A
-          "li s11, 256\n\t"  // Stride matrice B
-          "li a6,  256\n\t"  // Stride matrice C
-          "1:\n\t"
-          "mcfgm t3, t0, 1\n\t"
+          "add t0, x0, $3\n\t"       // t0 = M_rem
+          "add t1, x0, $2\n\t"       // t1 = Base C
+          "add t2, x0, $0\n\t"       // t2 = Base A
+          "li t3, 256\n\t"           // t3 = Stride unico (256) per A, B, C
           
-          // INIZIO CICLO 1: Pesca $4 e $1 dallo stack invece che dai registri
-          "lw t1, 52(sp)\n\t"   
-          "add s2, x0, s0\n\t"
-          "lw s3, 48(sp)\n\t"   
-          "2:\n\t"
-          "mcfgn t4, t1, 1\n\t"
+          "1:\n\t" // M-loop
+          "mcfgm t4, t0, 1\n\t"      // t4 = M_chunk
+          "add t5, x0, $4\n\t"       // t5 = N_rem (pescato da input $4)
+          "add t6, x0, t1\n\t"       // t6 = Ptr C (N-loop)
+          "add a0, x0, $1\n\t"       // a0 = Base B (pescato da input $1)
+          
+          "2:\n\t" // N-loop
+          "mcfgn a1, t5, 1\n\t"      // a1 = N_chunk
           "mzero.a acc0\n\t"
           
-          // INIZIO CICLO 2: Pesca $5 dallo stack
-          "lw t2, 56(sp)\n\t"   
-          "add s4, x0, s1\n\t"
-          "add s5, x0, s3\n\t"
+          "add a2, x0, $5\n\t"       // a2 = K_rem (pescato da input $5)
+          "add a3, x0, t2\n\t"       // a3 = Ptr A (K-loop)
+          "add a4, x0, a0\n\t"       // a4 = Ptr B (K-loop)
           
-          "3:\n\t"
-          "mcfgk t5, t2\n\t"
-          "mld.lhs m0, (s4), s10\n\t"
-          "mld.rhs m4, (s5), s11\n\t"
+          "3:\n\t" // K-loop
+          "mcfgk a5, a2\n\t"         // a5 = K_chunk
+          "mld.lhs m0, (a3), t3\n\t"
+          "mld.rhs m4, (a4), t3\n\t"
           "mmacc acc0, m4, m0\n\t"
-          "sub t2, t2, t5\n\t"
-          "mcfgk t6, t2\n\t"
-          "mul s8, t5, s10\n\t"
-          "add s6, s4, s8\n\t"
-          "mld.lhs m2, (s6), s10\n\t"
-          "mul s9, t5, s11\n\t"
-          "add s7, s5, s9\n\t"
-          "mld.rhs m6, (s7), s11\n\t"
+          "sub a2, a2, a5\n\t"
+          "mcfgk a6, a2\n\t"         // a6 = next_k_chunk
+          
+          // --- SHIFT ($6) MANTENUTO SOLO NEL K-LOOP ---
+          "srl s0, a5, $6\n\t"       // s0 = a5 / 2^shift
+          "mul s0, s0, t3\n\t"       // s0 = offset temporaneo
+          "add s1, a3, s0\n\t"       // s1 = ptr A temporaneo
+          "mld.lhs m2, (s1), t3\n\t"
+          "add s2, a4, s0\n\t"       // s2 = ptr B temporaneo
+          "mld.rhs m6, (s2), t3\n\t"
           "mmacc acc0, m6, m2\n\t"
-          "add t5, t5, t6\n\t"
-          "mul s8, t5, s10\n\t"
-          "add s4, s4, s8\n\t"
-          "mul s9, t5, s11\n\t"
-          "add s5, s5, s9\n\t"
-          "sub t2, t2, t6\n\t"
-          "bgtz t2, 3b\n\t"
+          "add a5, a5, a6\n\t"       // a5 = K_chunk + next_k_chunk
+          
+          "srl s0, a5, $6\n\t"
+          "mul s0, s0, t3\n\t"
+          "add a3, a3, s0\n\t"       // ptr A definitivo += offset
+          "add a4, a4, s0\n\t"       // ptr B definitivo += offset
+          // ---------------------------------------------
+          
+          "sub a2, a2, a6\n\t"
+          "bgtz a2, 3b\n\t"
           
           "mmov.am m8, acc0\n\t"
-          "slli t6, t4, 2\n\t"
-          "add s3, s3, t6\n\t"
-          "sub t1, t1, t4\n\t"
-          "mst m8, (s2), a6\n\t"
-          "add s2, s2, t6\n\t"
-          "bgtz t1, 2b\n\t"
           
-          "mul t6, t3, a6\n\t"
-          "add s0, s0, t6\n\t"
-          "slli t6, t3, 2\n\t"
-          "add s1, s1, t6\n\t"
-          "sub t0, t0, t3\n\t"
-          "bgtz t0, 1b\n\t"
+          // --- N-loop: NESSUN SHIFT ($6 rimosso) ---
+          "slli s1, a1, 2\n\t"       // s1 = N_chunk * 4 (calcolo offset in byte)
+          "add a0, a0, s1\n\t"       // Base B += offset
+          "sub t5, t5, a1\n\t"
+          "mst m8, (t6), t3\n\t"
+          "add t6, t6, s1\n\t"       // Ptr C += offset
+          // -----------------------------------------
           
-          // 3. Ripristina i registri S e dealloca i 64 byte
-          "lw s0, 0(sp)\n\t"
-          "lw s1, 4(sp)\n\t"
-          "lw s2, 8(sp)\n\t"
-          "lw s3, 12(sp)\n\t"
-          "lw s4, 16(sp)\n\t"
-          "lw s5, 20(sp)\n\t"
-          "lw s6, 24(sp)\n\t"
-          "lw s7, 28(sp)\n\t"
-          "lw s8, 32(sp)\n\t"
-          "lw s9, 36(sp)\n\t"
-          "lw s10, 40(sp)\n\t"
-          "lw s11, 44(sp)\n\t"
-          "addi sp, sp, 64";
+          "bgtz t5, 2b\n\t"
+          
+          // --- M-loop: NESSUN SHIFT ($6 rimosso) ---
+          "mul s1, t4, t3\n\t"       // s1 = M_chunk * stride(256)
+          "add t1, t1, s1\n\t"       // Base C += offset_stride
+          "slli s1, t4, 2\n\t"       // s1 = M_chunk * 4 (calcolo offset in byte)
+          "add t2, t2, s1\n\t"       // Base A += offset_bytes
+          // -----------------------------------------
+          
+          "sub t0, t0, t4\n\t"
+          "bgtz t0, 1b";
 
+      // CLOBBER LIST: Il compilatore gestirà lo stack per s0, s1 e s2 in automatico!
       auto constraints =
           "r,r,r,r,r,r,r,i,i,i,"
           "~{t0},~{t1},~{t2},~{t3},~{t4},~{t5},~{t6},"
-          "~{a6},~{memory}";
+          "~{a0},~{a1},~{a2},~{a3},~{a4},~{a5},~{a6},"
+          "~{s0},~{s1},~{s2},~{memory}";
 
       auto *inlineAsm = llvm::InlineAsm::get(fnTy, asmString, constraints, /*hasSideEffects=*/true, /*isAlignStack=*/false);
       builder.CreateCall(inlineAsm, asmOperands);
