@@ -170,11 +170,39 @@ struct SnitchSdmaTwodCopyOpLowering : public ConvertOpToLLVMPattern<memref::Copy
     Value cfg32 = rewriter.create<LLVM::ConstantOp>(loc, i32Ty, rewriter.getIntegerAttr(i32Ty, 0));
 
     ModuleOp module = op->getParentOfType<ModuleOp>();
-    auto sdmaStartFn = LLVM::lookupOrCreateFn( module, "llvm.riscv.sdma.start.twod", {i64Ty, i64Ty, i32Ty, i32Ty, i32Ty, i32Ty, i32Ty}, i32Ty);
-    (void)createLLVMCall(rewriter, loc, sdmaStartFn, {srcAddr64, dstAddr64, size32, srcStride32, dstStride32, nReps32, cfg32}, i32Ty);
+    
+    // 1. Avvia il trasferimento passando gli argomenti inline (niente ArrayRef esterno!)
+    auto sdmaStartFn = LLVM::lookupOrCreateFn(module, "llvm.riscv.sdma.start.twod", {i64Ty, i64Ty, i32Ty, i32Ty, i32Ty, i32Ty, i32Ty}, i32Ty);
+    auto startCallResults = createLLVMCall(rewriter, loc, sdmaStartFn, {srcAddr64, dstAddr64, size32, srcStride32, dstStride32, nReps32, cfg32}, i32Ty);
+    Value tid = startCallResults[0];
 
-    auto sdmaWaitFn = LLVM::lookupOrCreateFn( module, "llvm.riscv.sdma.wait.for.idle", {}, LLVM::LLVMVoidType::get(rewriter.getContext()));
-    (void)createLLVMCall(rewriter, loc, sdmaWaitFn);
+    // 2. Suddividiamo i blocchi per creare il ciclo (Control Flow)
+    Block *currentBlock = rewriter.getBlock();
+    Block *exitBlock = rewriter.splitBlock(currentBlock, rewriter.getInsertionPoint());
+    Block *loopBlock = rewriter.createBlock(currentBlock->getParent(), exitBlock->getIterator());
+
+    rewriter.setInsertionPointToEnd(currentBlock);
+    rewriter.create<LLVM::BrOp>(loc, ValueRange(), loopBlock);
+
+    // 3. Costruiamo il corpo del ciclo (Polling)
+    rewriter.setInsertionPointToEnd(loopBlock);
+    
+    // Creiamo il selettore per DMSTAT (0 = leggi completed_id)
+    Value statSelector = rewriter.create<LLVM::ConstantOp>(loc, i32Ty, rewriter.getI32IntegerAttr(0));
+
+    // Chiama dmstat passandogli il selettore, sempre con le graffe inline
+    auto sdmaStatFn = LLVM::lookupOrCreateFn(module, "llvm.riscv.sdma.stat", {i32Ty}, i32Ty);
+    auto statCallResults = createLLVMCall(rewriter, loc, sdmaStatFn, {statSelector}, i32Ty);
+    Value completedId = statCallResults[0];
+
+    // Controlla se completedId < tid (isBusy).
+    Value isBusy = rewriter.create<LLVM::ICmpOp>(loc, LLVM::ICmpPredicate::ult, completedId, tid);
+
+    // CondBrOp verso se stesso se è occupato, altrimenti verso exitBlock
+    rewriter.create<LLVM::CondBrOp>(loc, isBusy, loopBlock, exitBlock);
+
+    // 4. Ripristiniamo l'insertion point nel blocco di uscita
+    rewriter.setInsertionPointToStart(exitBlock);
 
     rewriter.eraseOp(op);
     return success();
