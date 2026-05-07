@@ -227,6 +227,12 @@ public:
       auto *fnTy = llvm::FunctionType::get(builder.getVoidTy(), asmTypes, false);
       
       auto asmString =
+          // SALVATAGGIO DEI REGISTRI PROTETTI NELLO STACK
+          "addi sp, sp, -16\n\t"
+          "sw s0, 0(sp)\n\t"
+          "sw s1, 4(sp)\n\t"
+          "sw s2, 8(sp)\n\t"
+
           "mmac.dt $7, $8, $9\n\t"
           "add t0, x0, $3\n\t"       // t0 = M_rem
           "add t1, x0, $2\n\t"       // t1 = Base C
@@ -294,7 +300,13 @@ public:
           // -----------------------------------------
           
           "sub t0, t0, t4\n\t"
-          "bgtz t0, 1b";
+          "bgtz t0, 1b\n\t"
+          
+          // RIPRISTINO DEI REGISTRI PROTETTI DELLO STACK
+          "lw s0, 0(sp)\n\t"
+          "lw s1, 4(sp)\n\t"
+          "lw s2, 8(sp)\n\t"
+          "addi sp, sp, 16";
 
       // CLOBBER LIST: Il compilatore gestirà lo stack per s0, s1 e s2 in automatico!
       auto constraints =
