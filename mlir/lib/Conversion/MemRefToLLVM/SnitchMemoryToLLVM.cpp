@@ -21,7 +21,6 @@ using namespace mlir;
 namespace {
 
 static Value castIntToWidth(ConversionPatternRewriter &rewriter, Location loc, Value value, unsigned targetWidth) {
-    
   auto valueTy = value.getType().cast<IntegerType>();
   if (valueTy.getWidth() == targetWidth) return value;
   
@@ -55,13 +54,60 @@ struct SnitchL1AllocOpLowering : public AllocLikeOpLLVMLowering {
     
     auto allocOp = cast<memref::AllocOp>(op);
     auto memRefType = allocOp.getType();
-    
+
     Type elementPtrType = getElementPtrType(memRefType);
-      
-    auto allocFn = LLVM::lookupOrCreateFn(allocOp->getParentOfType<ModuleOp>(), "snrt_l1alloc", {getIndexType()}, getVoidPtrType());
-    auto results = createLLVMCall(rewriter, loc, allocFn, {sizeBytes}, getVoidPtrType());
     
-    Value allocatedPtr = rewriter.create<LLVM::AddrSpaceCastOp>(loc, elementPtrType, results[0]);
+    ModuleOp module = op->getParentOfType<ModuleOp>();
+    auto ctx = rewriter.getContext();
+    auto i32Ty = IntegerType::get(ctx, 32);
+    auto voidPtrTy = getVoidPtrType();
+    auto llvmVoidTy = LLVM::LLVMVoidType::get(ctx);
+
+    LLVM::lookupOrCreateFn(module, "snrt_l1alloc", {getIndexType()}, voidPtrTy);
+    LLVM::lookupOrCreateFn(module, "snrt_cluster_core_idx", {}, i32Ty);
+    LLVM::lookupOrCreateFn(module, "snrt_cluster_hw_barrier", {}, llvmVoidTy);
+
+    Value coreIdx = rewriter.create<LLVM::CallOp>(loc, TypeRange{i32Ty}, SymbolRefAttr::get(ctx, "snrt_cluster_core_idx"), ValueRange{}).getResult(0);
+    Value isCore0 = rewriter.create<LLVM::ICmpOp>(loc, LLVM::ICmpPredicate::eq, coreIdx, rewriter.create<LLVM::ConstantOp>(loc, i32Ty, rewriter.getI32IntegerAttr(0)));
+
+    static int allocCounter = 0;
+    std::string globalName = "_snitch_shared_alloc_" + std::to_string(allocCounter++);
+    LLVM::GlobalOp globalVar;
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(module.getBody());
+      globalVar = rewriter.create<LLVM::GlobalOp>(loc, voidPtrTy, /*isConstant=*/false, LLVM::Linkage::Internal, globalName, Attribute());
+    }
+    
+    Type globalPtrTy = LLVM::LLVMPointerType::get(voidPtrTy);
+    Value globalPtr = rewriter.create<LLVM::AddressOfOp>(loc, globalPtrTy, globalVar.getSymNameAttr());
+
+    Block *currentBlock = rewriter.getBlock();
+    Block *exitBlock = rewriter.splitBlock(currentBlock, rewriter.getInsertionPoint());
+    Block *allocBlock = rewriter.createBlock(currentBlock->getParent(), exitBlock->getIterator());
+    Block *barrierBlock = rewriter.createBlock(currentBlock->getParent(), exitBlock->getIterator());
+
+    rewriter.setInsertionPointToEnd(currentBlock);
+    rewriter.create<LLVM::CondBrOp>(loc, isCore0, allocBlock, barrierBlock);
+
+    rewriter.setInsertionPointToEnd(allocBlock);
+    Value rawPtr = rewriter.create<LLVM::CallOp>(loc, TypeRange{voidPtrTy}, SymbolRefAttr::get(ctx, "snrt_l1alloc"), ValueRange{sizeBytes}).getResult(0);
+    rewriter.create<LLVM::StoreOp>(loc, rawPtr, globalPtr); 
+    rewriter.create<LLVM::BrOp>(loc, ValueRange(), barrierBlock);
+
+    rewriter.setInsertionPointToEnd(barrierBlock);
+    
+    rewriter.create<LLVM::CallOp>(loc, TypeRange{}, SymbolRefAttr::get(ctx, "snrt_cluster_hw_barrier"), ValueRange{});
+    
+    Value sharedPtr = rewriter.create<LLVM::LoadOp>(loc, voidPtrTy, globalPtr);
+    
+    rewriter.create<LLVM::CallOp>(loc, TypeRange{}, SymbolRefAttr::get(ctx, "snrt_cluster_hw_barrier"), ValueRange{});
+    
+    rewriter.create<LLVM::BrOp>(loc, ValueRange(), exitBlock);
+
+    rewriter.setInsertionPointToStart(exitBlock);
+    Value allocatedPtr = rewriter.create<LLVM::AddrSpaceCastOp>(loc, elementPtrType, sharedPtr);
+    
     return std::make_tuple(allocatedPtr, allocatedPtr);
   }
 };
@@ -81,7 +127,6 @@ struct SnitchSdmaTwodCopyOpLowering : public ConvertOpToLLVMPattern<memref::Copy
       : ConvertOpToLLVMPattern<memref::CopyOp>(converter), l1MemorySpace(l1MemorySpace) {}
 
   LogicalResult matchAndRewrite(memref::CopyOp op, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const override {
-    
     if (!isSupportedSdmaTwodCopy(op, l1MemorySpace)) return failure();
 
     auto loc = op.getLoc();
