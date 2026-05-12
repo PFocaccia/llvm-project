@@ -1,9 +1,3 @@
-//===- QuadrilateroToLLVMIRTranslation.cpp - Translate Quadrilatero to LLVM IR -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
 //===----------------------------------------------------------------------===//
 //
 // This file implements a translation between the Quadrilatero dialect and
@@ -24,8 +18,7 @@ using namespace mlir;
 using namespace mlir::LLVM;
 
 namespace {
-/// Implementation of the dialect interface that converts operations belonging
-/// to the Quadrilatero dialect to LLVM IR.
+
 class QuadrilateroDialectLLVMIRTranslationInterface
     : public LLVMTranslationDialectInterface {
 public:
@@ -215,107 +208,254 @@ public:
         return builder.CreateBitCast(value, i8PtrTy);
       };
 
-      asmOperands[0] = toI8Ptr(asmOperands[0]);
-      asmOperands[1] = toI8Ptr(asmOperands[1]);
-      asmOperands[2] = toI8Ptr(asmOperands[2]);
+      asmOperands[0] = toI8Ptr(asmOperands[0]); // addrA
+      asmOperands[1] = toI8Ptr(asmOperands[1]); // addrB
+      asmOperands[2] = toI8Ptr(asmOperands[2]); // addrC
 
       SmallVector<llvm::Type *, 10> asmTypes;
-      asmTypes.reserve(asmOperands.size());
       for (llvm::Value *value : asmOperands)
         asmTypes.push_back(value->getType());
 
       auto *fnTy = llvm::FunctionType::get(builder.getVoidTy(), asmTypes, false);
       
       auto asmString =
-          // SALVATAGGIO DEI REGISTRI PROTETTI NELLO STACK
-          "addi sp, sp, -16\n\t"
-          "sw s0, 0(sp)\n\t"
-          "sw s1, 4(sp)\n\t"
-          "sw s2, 8(sp)\n\t"
 
-          "mmac.dt $7, $8, $9\n\t"
-          "add t0, x0, $3\n\t"       // t0 = M_rem
-          "add t1, x0, $2\n\t"       // t1 = Base C
-          "add t2, x0, $0\n\t"       // t2 = Base A
-          "li t3, 256\n\t"           // t3 = Stride unico (256) per A, B, C
-          
-          "1:\n\t" // M-loop
-          "mcfgm t4, t0, 1\n\t"      // t4 = M_chunk
-          "add t5, x0, $4\n\t"       // t5 = N_rem (pescato da input $4)
-          "add t6, x0, t1\n\t"       // t6 = Ptr C (N-loop)
-          "add a0, x0, $1\n\t"       // a0 = Base B (pescato da input $1)
-          
-          "2:\n\t" // N-loop
-          "mcfgn a1, t5, 1\n\t"      // a1 = N_chunk
-          "mzero.a acc0\n\t"
-          
-          "add a2, x0, $5\n\t"       // a2 = K_rem (pescato da input $5)
-          "add a3, x0, t2\n\t"       // a3 = Ptr A (K-loop)
-          "add a4, x0, a0\n\t"       // a4 = Ptr B (K-loop)
-          
-          "3:\n\t" // K-loop
-          "mcfgk a5, a2\n\t"         // a5 = K_chunk
-          "mld.lhs m0, (a3), t3\n\t"
-          "mld.rhs m4, (a4), t3\n\t"
-          "mmacc acc0, m4, m0\n\t"
-          "sub a2, a2, a5\n\t"
-          "mcfgk a6, a2\n\t"         // a6 = next_k_chunk
-          
-          // --- SHIFT ($6) MANTENUTO SOLO NEL K-LOOP ---
-          "srl s0, a5, $6\n\t"       // s0 = a5 / 2^shift
-          "mul s0, s0, t3\n\t"       // s0 = offset temporaneo
-          "add s1, a3, s0\n\t"       // s1 = ptr A temporaneo
-          "mld.lhs m2, (s1), t3\n\t"
-          "add s2, a4, s0\n\t"       // s2 = ptr B temporaneo
-          "mld.rhs m6, (s2), t3\n\t"
-          "mmacc acc0, m6, m2\n\t"
-          "add a5, a5, a6\n\t"       // a5 = K_chunk + next_k_chunk
-          
-          "srl s0, a5, $6\n\t"
-          "mul s0, s0, t3\n\t"
-          "add a3, a3, s0\n\t"       // ptr A definitivo += offset
-          "add a4, a4, s0\n\t"       // ptr B definitivo += offset
-          // ---------------------------------------------
-          
-          "sub a2, a2, a6\n\t"
-          "bgtz a2, 3b\n\t"
-          
-          "mmov.am m8, acc0\n\t"
-          
-          // --- N-loop: NESSUN SHIFT ($6 rimosso) ---
-          "slli s1, a1, 2\n\t"       // s1 = N_chunk * 4 (calcolo offset in byte)
-          "add a0, a0, s1\n\t"       // Base B += offset
-          "sub t5, t5, a1\n\t"
-          "mst m8, (t6), t3\n\t"
-          "add t6, t6, s1\n\t"       // Ptr C += offset
-          // -----------------------------------------
-          
-          "bgtz t5, 2b\n\t"
-          
-          // --- M-loop: NESSUN SHIFT ($6 rimosso) ---
-          "mul s1, t4, t3\n\t"       // s1 = M_chunk * stride(256)
-          "add t1, t1, s1\n\t"       // Base C += offset_stride
-          "slli s1, t4, 2\n\t"       // s1 = M_chunk * 4 (calcolo offset in byte)
-          "add t2, t2, s1\n\t"       // Base A += offset_bytes
-          // -----------------------------------------
-          
-          "sub t0, t0, t4\n\t"
-          "bgtz t0, 1b\n\t"
-          
-          // RIPRISTINO DEI REGISTRI PROTETTI DELLO STACK
-          "lw s0, 0(sp)\n\t"
-          "lw s1, 4(sp)\n\t"
-          "lw s2, 8(sp)\n\t"
-          "addi sp, sp, 16";
+          "addi sp, sp, -60\n\t"
+          "sw s0, 0(sp)  ; sw s1, 4(sp)  ; sw s2, 8(sp)  ; sw s3, 12(sp)\n\t"
+          "sw s4, 16(sp) ; sw s5, 20(sp) ; sw s6, 24(sp) ; sw s7, 28(sp)\n\t"
+          "sw s8, 32(sp) ; sw s9, 36(sp) ; sw s10, 40(sp); sw s11, 44(sp)\n\t"
+          "sw $0, 48(sp) ; sw $2, 52(sp) ; sw $3, 56(sp)\n\t"
 
-      // CLOBBER LIST: Il compilatore gestirà lo stack per s0, s1 e s2 in automatico!
+          "mmac.dt $7, $8, $9 \n\t"
+          "mcfgm t3, $3, 1    \n\t"
+          "mcfgn t4, $4, 1    \n\t"
+          "mcfgk t5, $5       \n\t"
+          "li   s0, 256       \n\t"   
+          "li   t0, 256       \n\t"   
+          
+          "mld.lhs m0, ($0), s0 \n\t"
+          "mld.rhs m4, ($1), t0 \n\t"
+          "mzero.a acc0         \n\t"
+          "mmacc   acc0, m4, m0 \n\t"
+          "sub  t2, $5, t5      \n\t"
+          "srl  t6, t5, $6      \n\t"
+          "blez t2, 2f          \n\t"
+
+          "mul  s8, t6, s0      \n\t"
+          "mul  s9, t6, t0      \n\t"
+          "mcfgk t5, t2         \n\t"
+          "add  s6, $0, s8      \n\t"
+          "add  s7, $1, s9      \n\t"
+          "mld.lhs m2, (s6), s0 \n\t"
+          "mld.rhs m6, (s7), t0 \n\t"
+          "mmacc   acc0, m6, m2 \n\t"
+          "sub  t2, t2, t5      \n\t"
+          
+          "srl  t6, t5, $6      \n\t"
+          "mul  s6, t6, s0      \n\t"
+          "add  s6, s8, s6      \n\t"
+          "add  s4, $0, s6      \n\t"
+          "mul  s7, t6, t0      \n\t"
+          "add  s7, s9, s7      \n\t"
+          "add  s5, $1, s7      \n\t"
+          
+          "blez t2, 2f          \n\t"
+          "mcfgk t5, t2         \n\t"
+
+          "1: \n\t"
+          "mld.lhs m0, (s4), s0 \n\t"
+          "mld.rhs m4, (s5), t0 \n\t"
+          "mmacc   acc0, m4, m0 \n\t"
+          "sub  t2, t2, t5      \n\t"
+          "srl  t6, t5, $6      \n\t" 
+          "mul  s8, t6, s0      \n\t"
+          "mul  s9, t6, t0      \n\t"
+          "blez t2, 2f          \n\t"
+          "add  s6, s4, s8      \n\t"
+          "add  s7, s5, s9      \n\t"
+          "mcfgk t5, t2         \n\t"
+          "mld.lhs m2, (s6), s0 \n\t"
+          "mld.rhs m6, (s7), t0 \n\t"
+          "mmacc   acc0, m6, m2 \n\t"
+          
+          "srl  t6, t5, $6      \n\t"
+          "mul  s6, t6, s0      \n\t"
+          "add  s6, s8, s6      \n\t"
+          "add  s4, s4, s6      \n\t"
+          "mul  s7, t6, t0      \n\t"
+          "add  s7, s9, s7      \n\t"
+          "add  s5, s5, s7      \n\t"
+          
+          "sub  t2, t2, t5      \n\t"
+          "mcfgk t5, t2         \n\t"
+          "bgtz t2, 1b          \n\t"
+
+          "2: \n\t"
+          "mmov.am m8, acc0     \n\t"
+          "mzero.a acc0         \n\t"
+          "sub  t1, $4, t4      \n\t"
+          "slli t6, t4, 2       \n\t"
+          "add  s10, x0, $2     \n\t"
+          "add  s2, $2, t6      \n\t"
+          "add  s3, $1, t6      \n\t"
+          "add  s11, x0, t4     \n\t"
+          "blez t1, 8f          \n\t"
+
+          "3: \n\t"
+          "add  t2, x0, $5      \n\t"
+          "mcfgk t5, t2         \n\t"
+          "mcfgn t4, t1, 1      \n\t"
+          "add   s4, x0, $0     \n\t"
+          "add   s5, x0, s3     \n\t"
+          "mld.lhs m0, (s4), s0 \n\t"
+          "mld.rhs m4, (s5), t0 \n\t"
+          "sub  t2, t2, t5      \n\t"
+          "srl  t6, t5, $6      \n\t" 
+          "mul  s8, t6, s0      \n\t"
+          "mul  s9, t6, t0      \n\t"
+          "mmacc   acc0, m4, m0 \n\t"
+          "add  s6, s4, s8      \n\t"
+          "add  s7, s5, s9      \n\t"
+          "blez t2, 4f          \n\t"
+          "mld.lhs m2, (s6), s0 \n\t"
+          "mld.rhs m6, (s7), t0 \n\t"
+          "mmacc   acc0, m6, m2 \n\t"
+          "mcfgk t5, t2         \n\t"
+          
+          "srl  t6, t5, $6      \n\t"
+          "mul  s6, t6, s0      \n\t"
+          "add  s6, s8, s6      \n\t"
+          "add  s4, s4, s6      \n\t"
+          "mul  s7, t6, t0      \n\t"
+          "add  s7, s9, s7      \n\t"
+          "add  s5, s5, s7      \n\t"
+          
+          "sub  t2, t2, t5      \n\t"
+          "mcfgk t5, t2         \n\t"
+          "bgtz t2, 5f          \n\t"
+
+          "4: \n\t"
+          "mcfgn s11, s11, 1    \n\t"
+          "mst m8, (s10), t0    \n\t"
+          "mcfgn t4, t4, 1      \n\t"
+          "j    7f              \n\t"
+
+          "5: \n\t"
+          "mcfgn s11, s11, 1    \n\t"
+          "mst m8, (s10), t0    \n\t"
+          "mcfgn t4, t4, 1      \n\t"
+          
+          "6: \n\t"
+          "mld.lhs m0, (s4), s0 \n\t"
+          "mld.rhs m4, (s5), t0 \n\t"
+          "sub  t2, t2, t5      \n\t"
+          "srl  t6, t5, $6      \n\t" 
+          "mul  s8, t6, s0      \n\t"
+          "mul  s9, t6, t0      \n\t"
+          "mmacc   acc0, m4, m0 \n\t"
+          "blez t2, 7f          \n\t"
+          "add  s6, s4, s8      \n\t"
+          "add  s7, s5, s9      \n\t"
+          "mcfgk t5, t2         \n\t"
+          "mld.lhs m2, (s6), s0 \n\t"
+          "mld.rhs m6, (s7), t0 \n\t"
+          "sub  t2, t2, t5      \n\t"
+          "mmacc   acc0, m6, m2 \n\t"
+          
+          "srl  t6, t5, $6      \n\t"
+          "mul  s6, t6, s0      \n\t"
+          "add  s6, s8, s6      \n\t"
+          "add  s4, s4, s6      \n\t"
+          "mul  s7, t6, t0      \n\t"
+          "add  s7, s9, s7      \n\t"
+          "add  s5, s5, s7      \n\t"
+          
+          "mcfgk t5, t2         \n\t"
+          "bgtz t2, 6b          \n\t"
+
+          "7: \n\t"
+          "mmov.am m8, acc0     \n\t"
+          "mzero.a acc0         \n\t"
+          "sub  t1, t1, t4      \n\t"
+          "slli t6, t4, 2       \n\t"
+          "add  s10, x0, s2     \n\t"
+          "add  s2, s2, t6      \n\t"
+          "add  s3, s3, t6      \n\t"
+          "add  s11, x0, t4     \n\t"
+          "bgtz t1, 3b          \n\t"
+
+          "8: \n\t"
+          "add  s1, x0, t3      \n\t"   
+          "mul  t6, t3, t0      \n\t"
+          "add  $2, $2, t6      \n\t"
+          "slli t6, t3, 2       \n\t"
+          "add  $0, $0, t6      \n\t"
+          "sub  $3, $3, t3      \n\t"
+          "blez $3, 10f         \n\t"
+
+          "mcfgm t3, $3, 1      \n\t"
+          "mcfgn t4, $4, 1      \n\t"
+          "mcfgk t5, $5         \n\t"
+          "mld.lhs m0, ($0), s0 \n\t"
+          "mld.rhs m4, ($1), t0 \n\t"
+          "sub  t2, $5, t5      \n\t"
+          "srl  t6, t5, $6      \n\t" 
+          "mul  s8, t6, s0      \n\t"
+          "mul  s9, t6, t0      \n\t"
+          "mzero.a acc0         \n\t"
+          "mmacc   acc0, m4, m0 \n\t"
+          "blez t2, 9f          \n\t"
+          "add  s6, $0, s8      \n\t"
+          "add  s7, $1, s9      \n\t"
+          "mcfgk t5, t2         \n\t"
+          "mld.lhs m2, (s6), s0 \n\t"
+          "mld.rhs m6, (s7), t0 \n\t"
+          "mmacc   acc0, m6, m2 \n\t"
+          "sub  t2, t2, t5      \n\t"
+          
+          "mcfgn s11, s11, 1    \n\t"
+          "mcfgm s1 , s1 , 1    \n\t"   
+          "mst   m8, (s10), t0  \n\t"
+          "mcfgm t3, t3, 1      \n\t"   
+          "mcfgn t4, t4, 1      \n\t"
+          
+          "srl  t6, t5, $6      \n\t"
+          "mul  s6, t6, s0      \n\t"
+          "add  s6, s8, s6      \n\t"
+          "add  s4, $0, s6      \n\t"
+          "mul  s7, t6, t0      \n\t"
+          "add  s7, s9, s7      \n\t"
+          "add  s5, $1, s7      \n\t"
+          
+          "mcfgk t5, t2         \n\t"
+          "bgtz t2, 1b          \n\t"
+
+          "9: \n\t"
+          "mcfgn s11, s11, 1    \n\t"
+          "mcfgm s1, s1, 1      \n\t"   
+          "mst   m8, (s10), t0  \n\t"
+          "mcfgm t3, t3, 1      \n\t"
+          "mcfgn t4, t4, 1      \n\t"
+          "j    2b              \n\t"
+
+          "10: \n\t"
+          "mcfgn s11, s11, 1    \n\t"
+          "mcfgm s1, s1, 1      \n\t"   
+          "mst   m8, (s10), t0  \n\t"
+
+          "lw s0, 0(sp)  ; lw s1, 4(sp)  ; lw s2, 8(sp)  ; lw s3, 12(sp)\n\t"
+          "lw s4, 16(sp) ; lw s5, 20(sp) ; lw s6, 24(sp) ; lw s7, 28(sp)\n\t"
+          "lw s8, 32(sp) ; lw s9, 36(sp) ; lw s10, 40(sp); lw s11, 44(sp)\n\t"
+          "lw $0, 48(sp) ; lw $2, 52(sp) ; lw $3, 56(sp)\n\t"
+          "addi sp, sp, 60";
+
       auto constraints =
-          "r,r,r,r,r,r,r,i,i,i,"
+          "r,r,r,r,r,r,r,i,i,i," 
           "~{t0},~{t1},~{t2},~{t3},~{t4},~{t5},~{t6},"
-          "~{a0},~{a1},~{a2},~{a3},~{a4},~{a5},~{a6},"
-          "~{s0},~{s1},~{s2},~{memory}";
+          "~{s0},~{s1},~{s2},~{s3},~{s4},~{s5},~{s6},~{s7},~{s8},~{s9},~{s10},~{s11},"
+          "~{memory}";
 
-      auto *inlineAsm = llvm::InlineAsm::get(fnTy, asmString, constraints, /*hasSideEffects=*/true, /*isAlignStack=*/false);
+      auto *inlineAsm = llvm::InlineAsm::get(fnTy, asmString, constraints, true, false);
       builder.CreateCall(inlineAsm, asmOperands);
       return success();
     }
