@@ -14,6 +14,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
 using namespace mlir;
 
@@ -46,24 +47,24 @@ struct MatrixAddLowering : public OpRewritePattern<spatz::MatrixAddOp> {
     rewriter.create<scf::ForOp>(loc, c0, op.rows(), c1, ValueRange{}, [&](OpBuilder &builder, Location bodyLoc, Value iv, ValueRange) {
           
           Value rowIdx = iv;
-
           Value indices[] = {rowIdx, c0};
 
           Value accVec = builder.create<spatz::VLEOp>(bodyLoc, vectorType, op.accMatrix(), indices, vlI32);
-          
           Value tmpVec = builder.create<spatz::VLEOp>(bodyLoc, vectorType, op.tmpMatrix(), indices, vlI32);
+          
+          Value undefVec = builder.create<LLVM::UndefOp>(bodyLoc, vectorType);
 
           Value sumVec;
-
           if (elemType.isa<FloatType>()) {
-            sumVec = builder.create<spatz::VFAddVVOp>(bodyLoc, vectorType, accVec, accVec, tmpVec, vlI32);
+            sumVec = builder.create<spatz::VFAddVVOp>(bodyLoc, vectorType, undefVec, accVec, tmpVec, vlI32);
           } else {
-            sumVec = builder.create<spatz::VAddVVOp>(bodyLoc, vectorType, accVec, accVec, tmpVec, vlI32);
+            sumVec = builder.create<spatz::VAddVVOp>(bodyLoc, vectorType, undefVec, accVec, tmpVec, vlI32);
           }
 
           builder.create<spatz::VSEOp>(bodyLoc, sumVec, op.accMatrix(), indices, vlI32);
           
           builder.create<scf::YieldOp>(bodyLoc);
+          
         });
 
     rewriter.eraseOp(op);

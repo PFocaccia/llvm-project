@@ -450,9 +450,8 @@ public:
           "addi sp, sp, 60";
 
       auto constraints =
-          "r,r,r,r,r,r,r,i,i,i," 
+          "{a0},{a1},{a2},{a3},{a4},{a5},{a6},i,i,i," 
           "~{t0},~{t1},~{t2},~{t3},~{t4},~{t5},~{t6},"
-          "~{s0},~{s1},~{s2},~{s3},~{s4},~{s5},~{s6},~{s7},~{s8},~{s9},~{s10},~{s11},"
           "~{memory}";
 
       auto *inlineAsm = llvm::InlineAsm::get(fnTy, asmString, constraints, true, false);

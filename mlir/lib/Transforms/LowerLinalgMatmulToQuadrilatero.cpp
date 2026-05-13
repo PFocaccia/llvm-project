@@ -1,7 +1,9 @@
 //===- LowerLinalgMatmulToQuadrilatero.cpp -------------------------------===//
-// Ottimizzato con Paradigma DAE (Decoupled Access-Execute)
-// Core 0: DMA in/out (snrt_sdma) + Calcolo Vettoriale (spatz.matrix_add)
+// Ottimizzato con Paradigma DAE (Decoupled Access-Execute) e Pipelining
+// Core 0: DMA in/out (snrt_sdma) + Accumulo Vettoriale (spatz.matrix_add)
 // Core 1: Calcolo Matriciale (quadrilatero)
+// Pipeline: Double buffering per A, B e C_temp. 
+// Overlap perfetto: Core 0 (Vector Add K) // Core 1 (Matmul K+1)
 //==----------------------------------------------------------------------===//
 
 #include "PassDetail.h"
@@ -21,6 +23,7 @@
 using namespace mlir;
 
 namespace {
+
 
 static int32_t getDataTypeCode(Type type) {
   if (auto intType = type.dyn_cast<IntegerType>()) {
@@ -98,9 +101,17 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     int32_t dtC_val = getDataTypeCode(cElemType);
 
     unsigned bitWidth = aElemType.getIntOrFloatBitWidth();
-    
     int64_t tileKVal = (bitWidth == 32) ? 64 : (bitWidth == 16) ? 128 : 256;
     int64_t tileMVal = 64; int64_t tileNVal = 64;
+
+    int64_t shiftVal = 0;
+    if (bitWidth == 32) {
+      shiftVal = 0;
+    } else if (bitWidth == 16) {
+      shiftVal = 2;
+    } else if (bitWidth == 8) {
+      shiftVal = 4;
+    }
 
     OpBuilder builder(op);
     Location loc = op.getLoc();
@@ -143,8 +154,9 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     Value aL1_1 = builder.create<memref::AllocOp>(loc, aL1Type);
     Value bL1_0 = builder.create<memref::AllocOp>(loc, bL1Type);
     Value bL1_1 = builder.create<memref::AllocOp>(loc, bL1Type);
-    Value cAcc = builder.create<memref::AllocOp>(loc, cAccType);
-    Value cTmp = builder.create<memref::AllocOp>(loc, cAccType);
+    Value cTmp_0 = builder.create<memref::AllocOp>(loc, cAccType);
+    Value cTmp_1 = builder.create<memref::AllocOp>(loc, cAccType);
+    Value cAcc = builder.create<memref::AllocOp>(loc, cAccType); 
 
     auto tagType = MemRefType::get({1}, builder.getI32Type());
     Value tagA_0 = builder.create<memref::AllocaOp>(loc, tagType);
@@ -170,23 +182,64 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
           Value aL0 = createSubview2D(ijB, ijL, aL1_0, c0, c0, k0_eff, mE, aElemType, l1SpaceAttr);
           Value bL0 = createSubview2D(ijB, ijL, bL1_0, c0, c0, k0_eff, nE, bElemType, l1SpaceAttr);
           
+          Value k1 = ijB.create<arith::ConstantIndexOp>(ijL, tileKVal);
+          Value has_k1 = ijB.create<arith::CmpIOp>(ijL, arith::CmpIPredicate::slt, k1, dimK);
+
           ijB.create<scf::IfOp>(ijL, isCore0, [&](OpBuilder &ifB, Location ifL) {
+
             ifB.create<memref::DmaStartOp>(ifL, aS0, ValueRange{c0,c0}, aL0, ValueRange{c0,c0}, ifB.create<arith::MulIOp>(ifL, k0_eff, mE), tagA_0, ValueRange{c0});
             ifB.create<memref::DmaStartOp>(ifL, bS0, ValueRange{c0,c0}, bL0, ValueRange{c0,c0}, ifB.create<arith::MulIOp>(ifL, k0_eff, nE), tagB_0, ValueRange{c0});
+            
+            ifB.create<scf::IfOp>(ifL, has_k1, [&](OpBuilder &innerB, Location innerL) {
+              Value k1_eff = createMinIndex(innerB, innerL, innerB.create<arith::SubIOp>(innerL, dimK, k1), tk);
+              Value aS1 = createSubview2D(innerB, innerL, a, k1, i, k1_eff, mE, aElemType, aType.getMemorySpace());
+              Value bS1 = createSubview2D(innerB, innerL, b, k1, j, k1_eff, nE, bElemType, bType.getMemorySpace());
+              Value aL1 = createSubview2D(innerB, innerL, aL1_1, c0, c0, k1_eff, mE, aElemType, l1SpaceAttr);
+              Value bL1 = createSubview2D(innerB, innerL, bL1_1, c0, c0, k1_eff, nE, bElemType, l1SpaceAttr);
+              
+              innerB.create<memref::DmaStartOp>(innerL, aS1, ValueRange{c0,c0}, aL1, ValueRange{c0,c0}, innerB.create<arith::MulIOp>(innerL, k1_eff, mE), tagA_1, ValueRange{c0});
+              innerB.create<memref::DmaStartOp>(innerL, bS1, ValueRange{c0,c0}, bL1, ValueRange{c0,c0}, innerB.create<arith::MulIOp>(innerL, k1_eff, nE), tagB_1, ValueRange{c0});
+              innerB.create<scf::YieldOp>(innerL);
+            });
+
+            ifB.create<memref::DmaWaitOp>(ifL, tagA_0, ValueRange{c0}, ifB.create<arith::MulIOp>(ifL, k0_eff, mE));
+            ifB.create<memref::DmaWaitOp>(ifL, tagB_0, ValueRange{c0}, ifB.create<arith::MulIOp>(ifL, k0_eff, nE));
             ifB.create<scf::YieldOp>(ifL);
           });
 
-          SmallVector<Value, 8> iterArgs = {aL1_0, aL1_1, bL1_0, bL1_1, tagA_0, tagA_1, tagB_0, tagB_1};
+          ijB.create<func::CallOp>(ijL, hwBarrierFn, ValueRange{});
+
+          ijB.create<scf::IfOp>(ijL, isCore1, [&](OpBuilder &ifB, Location ifL) {
+            Value cAccS = createSubview2D(ifB, ifL, cAcc, c0, c0, mE, nE, cElemType, l1SpaceAttr);
+            
+            ifB.create<quadrilatero::TcdmMatmulMemRefOp>(ifL, aL0, bL0, cAccS, mE, nE, k0_eff, 
+              ifB.create<arith::ConstantIndexOp>(ifL, shiftVal), builder.getI32IntegerAttr(dtC_val), builder.getI32IntegerAttr(dtA_val), builder.getI32IntegerAttr(dtB_val));
+            ifB.create<scf::YieldOp>(ifL);
+          });
+
+          ijB.create<scf::IfOp>(ijL, isCore0, [&](OpBuilder &ifB, Location ifL) {
+            ifB.create<scf::IfOp>(ifL, has_k1, [&](OpBuilder &innerB, Location innerL) {
+              Value k1_eff = createMinIndex(innerB, innerL, innerB.create<arith::SubIOp>(innerL, dimK, k1), tk);
+              innerB.create<memref::DmaWaitOp>(innerL, tagA_1, ValueRange{c0}, innerB.create<arith::MulIOp>(innerL, k1_eff, mE));
+              innerB.create<memref::DmaWaitOp>(innerL, tagB_1, ValueRange{c0}, innerB.create<arith::MulIOp>(innerL, k1_eff, nE));
+              innerB.create<scf::YieldOp>(innerL);
+            });
+            ifB.create<scf::YieldOp>(ifL);
+          });
+
+          ijB.create<func::CallOp>(ijL, hwBarrierFn, ValueRange{});
+
+          SmallVector<Value, 10> iterArgs = {aL1_1, aL1_0, bL1_1, bL1_0, cTmp_0, cTmp_1, tagA_1, tagA_0, tagB_1, tagB_0};
           
-          ijB.create<scf::ForOp>(ijL, c0, dimK, tk, iterArgs,
+          ijB.create<scf::ForOp>(ijL, k1, dimK, tk, iterArgs,
             [&](OpBuilder &kB, Location kL, Value k, ValueRange rArgs) {
-              Value curA = rArgs[0]; Value nxtA = rArgs[1]; Value curB = rArgs[2]; Value nxtB = rArgs[3];
-              Value curTA = rArgs[4]; Value nxtTA = rArgs[5]; Value curTB = rArgs[6]; Value nxtTB = rArgs[7];
+              Value curA = rArgs[0]; Value nxtA = rArgs[1];
+              Value curB = rArgs[2]; Value nxtB = rArgs[3];
+              Value curCtmp = rArgs[4]; Value nxtCtmp = rArgs[5];
+              Value curTagA = rArgs[6]; Value nxtTagA = rArgs[7];
+              Value curTagB = rArgs[8]; Value nxtTagB = rArgs[9];
 
               Value k_eff = createMinIndex(kB, kL, kB.create<arith::SubIOp>(kL, dimK, k), tk);
-              Value nEA = kB.create<arith::MulIOp>(kL, k_eff, mE);
-              Value nEB = kB.create<arith::MulIOp>(kL, k_eff, nE);
-
               Value next_k = kB.create<arith::AddIOp>(kL, k, tk);
               Value has_next = kB.create<arith::CmpIOp>(kL, arith::CmpIPredicate::slt, next_k, dimK);
               
@@ -197,36 +250,31 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
                   Value bSn = createSubview2D(innerB, innerL, b, next_k, j, nk_eff, nE, bElemType, bType.getMemorySpace());
                   Value aLn = createSubview2D(innerB, innerL, nxtA, c0, c0, nk_eff, mE, aElemType, l1SpaceAttr);
                   Value bLn = createSubview2D(innerB, innerL, nxtB, c0, c0, nk_eff, nE, bElemType, l1SpaceAttr);
-                  innerB.create<memref::DmaStartOp>(innerL, aSn, ValueRange{c0,c0}, aLn, ValueRange{c0,c0}, innerB.create<arith::MulIOp>(innerL, nk_eff, mE), nxtTA, ValueRange{c0});
-                  innerB.create<memref::DmaStartOp>(innerL, bSn, ValueRange{c0,c0}, bLn, ValueRange{c0,c0}, innerB.create<arith::MulIOp>(innerL, nk_eff, nE), nxtTB, ValueRange{c0});
+                  
+                  innerB.create<memref::DmaStartOp>(innerL, aSn, ValueRange{c0,c0}, aLn, ValueRange{c0,c0}, innerB.create<arith::MulIOp>(innerL, nk_eff, mE), nxtTagA, ValueRange{c0});
+                  innerB.create<memref::DmaStartOp>(innerL, bSn, ValueRange{c0,c0}, bLn, ValueRange{c0,c0}, innerB.create<arith::MulIOp>(innerL, nk_eff, nE), nxtTagB, ValueRange{c0});
                   innerB.create<scf::YieldOp>(innerL);
                 });
                 ifB.create<scf::YieldOp>(ifL);
               });
-
-              kB.create<scf::IfOp>(kL, isCore0, [&](OpBuilder &ifB, Location ifL) {
-                ifB.create<memref::DmaWaitOp>(ifL, curTA, ValueRange{c0}, nEA);
-                ifB.create<memref::DmaWaitOp>(ifL, curTB, ValueRange{c0}, nEB);
-                ifB.create<scf::YieldOp>(ifL);
-              });
-
-              kB.create<func::CallOp>(kL, hwBarrierFn, ValueRange{});
-
-              Value aSubC = createSubview2D(kB, kL, curA, c0, c0, k_eff, mE, aElemType, l1SpaceAttr);
-              Value bSubC = createSubview2D(kB, kL, curB, c0, c0, k_eff, nE, bElemType, l1SpaceAttr);
-              Value cAccS = createSubview2D(kB, kL, cAcc, c0, c0, mE, nE, cElemType, l1SpaceAttr);
-              Value is_first = kB.create<arith::CmpIOp>(kL, arith::CmpIPredicate::eq, k, c0);
 
               kB.create<scf::IfOp>(kL, isCore1, [&](OpBuilder &ifB, Location ifL) {
-                ifB.create<scf::IfOp>(ifL, is_first, [&](OpBuilder &firstB, Location firstL) {
-                  firstB.create<quadrilatero::TcdmMatmulMemRefOp>(firstL, aSubC, bSubC, cAccS, mE, nE, k_eff, 
-                    builder.create<arith::ConstantIndexOp>(firstL, 0), builder.getI32IntegerAttr(dtC_val), builder.getI32IntegerAttr(dtA_val), builder.getI32IntegerAttr(dtB_val));
-                  firstB.create<scf::YieldOp>(firstL);
-                }, [&](OpBuilder &elseB, Location elseL) {
-                  Value cTmpS = createSubview2D(elseB, elseL, cTmp, c0, c0, mE, nE, cElemType, l1SpaceAttr);
-                  elseB.create<quadrilatero::TcdmMatmulMemRefOp>(elseL, aSubC, bSubC, cTmpS, mE, nE, k_eff, 
-                    builder.create<arith::ConstantIndexOp>(elseL, 0), builder.getI32IntegerAttr(dtC_val), builder.getI32IntegerAttr(dtA_val), builder.getI32IntegerAttr(dtB_val));
-                  elseB.create<scf::YieldOp>(elseL);
+                
+                Value aSubC = createSubview2D(ifB, ifL, curA, c0, c0, k_eff, mE, aElemType, l1SpaceAttr);
+                Value bSubC = createSubview2D(ifB, ifL, curB, c0, c0, k_eff, nE, bElemType, l1SpaceAttr);
+                Value cTmpS = createSubview2D(ifB, ifL, curCtmp, c0, c0, mE, nE, cElemType, l1SpaceAttr);
+                
+                ifB.create<quadrilatero::TcdmMatmulMemRefOp>(ifL, aSubC, bSubC, cTmpS, mE, nE, k_eff, 
+                  ifB.create<arith::ConstantIndexOp>(ifL, shiftVal), builder.getI32IntegerAttr(dtC_val), builder.getI32IntegerAttr(dtA_val), builder.getI32IntegerAttr(dtB_val));
+                ifB.create<scf::YieldOp>(ifL);
+              });
+
+              kB.create<scf::IfOp>(kL, isCore0, [&](OpBuilder &ifB, Location ifL) {
+                ifB.create<scf::IfOp>(ifL, has_next, [&](OpBuilder &innerB, Location innerL) {
+                  Value nk_eff = createMinIndex(innerB, innerL, innerB.create<arith::SubIOp>(innerL, dimK, next_k), tk);
+                  innerB.create<memref::DmaWaitOp>(innerL, nxtTagA, ValueRange{c0}, innerB.create<arith::MulIOp>(innerL, nk_eff, mE));
+                  innerB.create<memref::DmaWaitOp>(innerL, nxtTagB, ValueRange{c0}, innerB.create<arith::MulIOp>(innerL, nk_eff, nE));
+                  innerB.create<scf::YieldOp>(innerL);
                 });
                 ifB.create<scf::YieldOp>(ifL);
               });
@@ -234,22 +282,19 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
               kB.create<func::CallOp>(kL, hwBarrierFn, ValueRange{});
 
               kB.create<scf::IfOp>(kL, isCore0, [&](OpBuilder &ifB, Location ifL) {
-                Value not_first = ifB.create<arith::CmpIOp>(ifL, arith::CmpIPredicate::ne, k, c0);
-                ifB.create<scf::IfOp>(ifL, not_first, [&](OpBuilder &innerB, Location innerL) {
-                  Value cTmpS = createSubview2D(innerB, innerL, cTmp, c0, c0, mE, nE, cElemType, l1SpaceAttr);
-                  innerB.create<spatz::MatrixAddOp>(innerL, cAccS, cTmpS, mE, nE, builder.getI64IntegerAttr(64));
-                  innerB.create<scf::YieldOp>(innerL);
-                });
+                Value cTmpS = createSubview2D(ifB, ifL, curCtmp, c0, c0, mE, nE, cElemType, l1SpaceAttr);
+                Value cAccS = createSubview2D(ifB, ifL, cAcc, c0, c0, mE, nE, cElemType, l1SpaceAttr);
+                ifB.create<spatz::MatrixAddOp>(ifL, cAccS, cTmpS, mE, nE, builder.getI64IntegerAttr(64));
                 ifB.create<scf::YieldOp>(ifL);
               });
 
-              kB.create<scf::YieldOp>(kL, ValueRange{nxtA, curA, nxtB, curB, nxtTA, curTA, nxtTB, curTB});
+              kB.create<scf::YieldOp>(kL, ValueRange{nxtA, curA, nxtB, curB, nxtCtmp, curCtmp, nxtTagA, curTagA, nxtTagB, curTagB});
             });
 
           ijB.create<scf::IfOp>(ijL, isCore0, [&](OpBuilder &ifB, Location ifL) {
             Value cSubOrig = createSubview2D(ifB, ifL, c, i, j, mE, nE, cElemType, cType.getMemorySpace());
-            Value cAccFinal = createSubview2D(ifB, ifL, cAcc, c0, c0, mE, nE, cElemType, l1SpaceAttr);
-            ifB.create<memref::CopyOp>(ifL, cAccFinal, cSubOrig);
+            Value cAccS = createSubview2D(ifB, ifL, cAcc, c0, c0, mE, nE, cElemType, l1SpaceAttr);
+            ifB.create<memref::CopyOp>(ifL, cAccS, cSubOrig);
             ifB.create<scf::YieldOp>(ifL);
           });
 
