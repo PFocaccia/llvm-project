@@ -1,9 +1,5 @@
 //===- LowerLinalgMatmulToQuadrilatero.cpp -------------------------------===//
-// Ottimizzato con Paradigma DAE (Decoupled Access-Execute) e Pipelining
-// Core 0: DMA in/out (snrt_sdma) + Accumulo Vettoriale (spatz.matrix_add)
-// Core 1: Calcolo Matriciale (quadrilatero)
-// Pipeline: Double buffering per A, B e C_temp. 
-// Overlap perfetto: Core 0 (Vector Add K) // Core 1 (Matmul K+1)
+
 //==----------------------------------------------------------------------===//
 
 #include "PassDetail.h"
@@ -95,10 +91,24 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     Type aElemType = aType.getElementType();
     Type bElemType = bType.getElementType();
     Type cElemType = cType.getElementType();
-    
+
     int32_t dtA_val = getDataTypeCode(aElemType);
     int32_t dtB_val = getDataTypeCode(bElemType);
     int32_t dtC_val = getDataTypeCode(cElemType);
+
+    if (auto attrA = op->getAttrOfType<StringAttr>("quadrilatero.type_a")) {
+      if (attrA.getValue() == "fp8e4m3") dtA_val = 4;
+      else if (attrA.getValue() == "fp8e5m2") dtA_val = 12;
+    }
+    
+    if (auto attrB = op->getAttrOfType<StringAttr>("quadrilatero.type_b")) {
+      if (attrB.getValue() == "fp8e4m3") dtB_val = 4;
+      else if (attrB.getValue() == "fp8e5m2") dtB_val = 12;
+    }
+
+    if (auto attrC = op->getAttrOfType<StringAttr>("quadrilatero.type_c")) {
+      if (attrC.getValue() == "fp32") dtC_val = 6;
+    }
 
     unsigned bitWidth = aElemType.getIntOrFloatBitWidth();
     int64_t tileKVal = (bitWidth == 32) ? 64 : (bitWidth == 16) ? 128 : 256;
@@ -108,9 +118,9 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     if (bitWidth == 32) {
       shiftVal = 0;
     } else if (bitWidth == 16) {
-      shiftVal = 2;
+      shiftVal = 1;
     } else if (bitWidth == 8) {
-      shiftVal = 4;
+      shiftVal = 2;
     }
 
     OpBuilder builder(op);
