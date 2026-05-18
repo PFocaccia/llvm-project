@@ -139,6 +139,15 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
       hwBarrierFn.setPrivate();
       symbolTable.insert(hwBarrierFn);
     }
+    
+    auto l1ResetFn = symbolTable.lookup<func::FuncOp>("snrt_l1alloc_reset");
+    if (!l1ResetFn) {
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToStart(module.getBody());
+      l1ResetFn = builder.create<func::FuncOp>(loc, "snrt_l1alloc_reset", builder.getFunctionType({}, {}));
+      l1ResetFn.setPrivate();
+      symbolTable.insert(l1ResetFn);
+    }
 
     Value cid = builder.create<func::CallOp>(loc, getCoreIdxFn, ValueRange{}).getResult(0);
     Value cid0 = builder.create<arith::ConstantIntOp>(loc, 0, 32);
@@ -464,6 +473,14 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
        });
        ifB.create<scf::YieldOp>(ifL);
     });
+    
+    builder.create<func::CallOp>(loc, hwBarrierFn, ValueRange{});
+
+    builder.create<scf::IfOp>(loc, isCore0, [&](OpBuilder &ifB, Location ifL) {
+        ifB.create<func::CallOp>(ifL, l1ResetFn, ValueRange{});
+        ifB.create<scf::YieldOp>(ifL);
+    });
+
     builder.create<func::CallOp>(loc, hwBarrierFn, ValueRange{});
 
     op.erase(); 
