@@ -78,7 +78,8 @@ def VSEOp : Spatz_Op<"vse"> {
 def MatrixAddOp : Spatz_Op<"matrix_add"> {
   let summary = "Add two matrices in TCDM using Spatz";
   let arguments = (ins AnyMemRef:$accMatrix, AnyMemRef:$tmpMatrix,
-                       Index:$rows, Index:$cols, I64Attr:$vecLen);
+                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
+                       I32Attr:$dataType); // <-- Aggiunto il tipo di dato per propagare l'fp8/fp32
   let assemblyFormat = "$accMatrix `,` $tmpMatrix `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($tmpMatrix) `,` type($rows) `,` type($cols)";
   let hasVerifier = 1;
 }

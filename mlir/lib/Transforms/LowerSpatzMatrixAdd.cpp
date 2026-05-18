@@ -35,7 +35,30 @@ struct MatrixAddLowering : public OpRewritePattern<spatz::MatrixAddOp> {
     
     if (!vecLenAttr || vecLenAttr.getInt() <= 0) return failure();
 
-    auto vectorType = VectorType::get({8}, elemType, {true});
+    auto memVectorType = VectorType::get({8}, elemType, {true});
+
+    Type computeElemType = elemType;
+    bool isFloat = false;
+
+    if (auto dtAttr = op->getAttrOfType<IntegerAttr>("dataType")) {
+      int32_t dtCode = dtAttr.getInt();
+      if (dtCode == 5) { // FP16
+        computeElemType = rewriter.getF16Type();
+        isFloat = true;
+      } else if (dtCode == 6) { // FP32
+        computeElemType = rewriter.getF32Type();
+        isFloat = true;
+      } else if (dtCode == 13) { // BF16
+        computeElemType = rewriter.getBF16Type();
+        isFloat = true;
+      }
+    } else {
+      if (elemType.isa<FloatType>()) {
+        isFloat = true;
+      }
+    }
+
+    auto computeVectorType = VectorType::get({8}, computeElemType, {true});
 
     Location loc = op.getLoc();
     Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
@@ -49,19 +72,33 @@ struct MatrixAddLowering : public OpRewritePattern<spatz::MatrixAddOp> {
           Value rowIdx = iv;
           Value indices[] = {rowIdx, c0};
 
-          Value accVec = builder.create<spatz::VLEOp>(bodyLoc, vectorType, op.accMatrix(), indices, vlI32);
-          Value tmpVec = builder.create<spatz::VLEOp>(bodyLoc, vectorType, op.tmpMatrix(), indices, vlI32);
+          Value accVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.accMatrix(), indices, vlI32);
+          Value tmpVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.tmpMatrix(), indices, vlI32);
           
-          Value undefVec = builder.create<LLVM::UndefOp>(bodyLoc, vectorType);
+          Value accComputeVec = accVec;
+          Value tmpComputeVec = tmpVec;
 
-          Value sumVec;
-          if (elemType.isa<FloatType>()) {
-            sumVec = builder.create<spatz::VFAddVVOp>(bodyLoc, vectorType, undefVec, accVec, tmpVec, vlI32);
-          } else {
-            sumVec = builder.create<spatz::VAddVVOp>(bodyLoc, vectorType, undefVec, accVec, tmpVec, vlI32);
+          if (memVectorType != computeVectorType) {
+            accComputeVec = builder.create<arith::BitcastOp>(bodyLoc, computeVectorType, accVec);
+            tmpComputeVec = builder.create<arith::BitcastOp>(bodyLoc, computeVectorType, tmpVec);
           }
 
-          builder.create<spatz::VSEOp>(bodyLoc, sumVec, op.accMatrix(), indices, vlI32);
+          Value undefVec = builder.create<LLVM::UndefOp>(bodyLoc, computeVectorType);
+          Value sumComputeVec;
+
+          if (isFloat) {
+            sumComputeVec = builder.create<spatz::VFAddVVOp>(bodyLoc, computeVectorType, undefVec, accComputeVec, tmpComputeVec, vlI32);
+          } else {
+            sumComputeVec = builder.create<spatz::VAddVVOp>(bodyLoc, computeVectorType, undefVec, accComputeVec, tmpComputeVec, vlI32);
+          }
+
+          Value sumMemVec = sumComputeVec;
+
+          if (memVectorType != computeVectorType) {
+            sumMemVec = builder.create<arith::BitcastOp>(bodyLoc, memVectorType, sumComputeVec);
+          }
+
+          builder.create<spatz::VSEOp>(bodyLoc, sumMemVec, op.accMatrix(), indices, vlI32);
           
           builder.create<scf::YieldOp>(bodyLoc);
           
