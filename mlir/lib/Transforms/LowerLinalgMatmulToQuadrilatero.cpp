@@ -17,7 +17,11 @@
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpImplementation.h"
+#include "mlir/IR/AffineExpr.h"
+#include "mlir/IR/AffineMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/StringRef.h"
 #include "mlir/IR/SymbolTable.h"  
 
 using namespace mlir;
@@ -43,14 +47,11 @@ static int32_t getDataTypeCode(Type type) {
 
 static Value createMinIndex(OpBuilder &builder, Location loc, Value lhs, Value rhs) {
   Value cmp = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, lhs, rhs);
-
   return builder.create<arith::SelectOp>(loc, cmp, lhs, rhs);
-
 }
 
 static Value createSubview2D(OpBuilder &builder, Location loc, Value base, Value off0, Value off1, Value size0, Value size1,
                              Type elementType, Attribute memorySpace) {
-
   SmallVector<OpFoldResult, 2> offsets = {off0, off1};
   SmallVector<OpFoldResult, 2> sizes   = {size0, size1};
   SmallVector<OpFoldResult, 2> strides = {builder.getIndexAttr(1),builder.getIndexAttr(1)};
@@ -58,21 +59,17 @@ static Value createSubview2D(OpBuilder &builder, Location loc, Value base, Value
   (void)memorySpace;
 
   return builder.create<memref::SubViewOp>(loc, base, offsets, sizes, strides).getResult();
-
 }
 
 struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilateroBase<LowerLinalgMatmulToQuadrilateroPass> {
   
   void runOnOperation() override {
-
     func::FuncOp funcOp = getOperation();
-
     SmallVector<linalg::MatmulOp, 4> matmuls;
     
     funcOp.walk([&](linalg::MatmulOp op) { matmuls.push_back(op); });
     
     for (linalg::MatmulOp op : matmuls) if (failed(lowerMatmul(op))) signalPassFailure();
-  
   }
 
   LogicalResult lowerMatmul(linalg::MatmulOp op) {
@@ -117,6 +114,32 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     OpBuilder builder(op);
     Location loc = op.getLoc();
 
+    auto aShape = aType.getShape();
+    SmallVector<int64_t, 2> transShape = {aShape[1], aShape[0]};
+    auto aTransType = MemRefType::get(transShape, aElemType, MemRefLayoutAttrInterface{}, aType.getMemorySpace());
+    
+    Value aTrans = builder.create<memref::AllocOp>(loc, aTransType);
+    
+    auto d0 = builder.getAffineDimExpr(0);
+    auto d1 = builder.getAffineDimExpr(1);
+    auto mapInput = AffineMap::get(2, 0, {d0, d1}, builder.getContext());
+    auto mapOutput = AffineMap::get(2, 0, {d1, d0}, builder.getContext());
+    SmallVector<AffineMap, 2> indexingMaps = {mapInput, mapOutput};
+    
+    SmallVector<StringRef, 2> iteratorTypes = {"parallel", "parallel"};
+
+
+    builder.create<linalg::GenericOp>(
+        loc,
+        ValueRange{a},
+        ValueRange{aTrans},
+        indexingMaps,
+        iteratorTypes,
+        [&](OpBuilder &nestedBuilder, Location nestedLoc, ValueRange args) {
+            nestedBuilder.create<linalg::YieldOp>(nestedLoc, args[0]);
+        }
+    );
+
     auto module = op->getParentOfType<ModuleOp>();
     auto i32Ty = builder.getI32Type();
 
@@ -155,7 +178,7 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     Value isCore0 = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq, cid, cid0); 
     Value isCore1 = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq, cid, cid1); 
 
-    auto l1SpaceAttr = IntegerAttr::get(builder.getI64Type(), l1MemorySpace);
+    auto l1SpaceAttr = IntegerAttr::get(builder.getI64Type(), 1);
     auto aL1Type = MemRefType::get({tileKVal, tileMVal}, aElemType, MemRefLayoutAttrInterface{}, l1SpaceAttr);
     auto bL1Type = MemRefType::get({tileKVal, tileNVal}, bElemType, MemRefLayoutAttrInterface{}, l1SpaceAttr);
     auto cAccType = MemRefType::get({tileMVal, tileNVal}, cElemType, MemRefLayoutAttrInterface{}, l1SpaceAttr);
@@ -180,8 +203,9 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     Value c0 = builder.create<arith::ConstantIndexOp>(loc, 0);
     Value c64 = builder.create<arith::ConstantIndexOp>(loc, 64);
     Value tk = builder.create<arith::ConstantIndexOp>(loc, tileKVal);
-    Value dimK = builder.create<memref::DimOp>(loc, a, 0);
-    Value dimM = builder.create<memref::DimOp>(loc, a, 1);
+
+    Value dimK = builder.create<memref::DimOp>(loc, aTrans, 0);
+    Value dimM = builder.create<memref::DimOp>(loc, aTrans, 1);
     Value dimN = builder.create<memref::DimOp>(loc, b, 1);
     
     Value true_val = builder.create<arith::ConstantIntOp>(loc, 1, 1);
@@ -195,7 +219,7 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     Value has_k1_global = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, k1_global, dimK);
 
     builder.create<scf::IfOp>(loc, isCore0, [&](OpBuilder &ifB, Location ifL) {
-      Value aS_0 = createSubview2D(ifB, ifL, a, c0, c0, kE_0, mE_0, aElemType, aType.getMemorySpace());
+      Value aS_0 = createSubview2D(ifB, ifL, aTrans, c0, c0, kE_0, mE_0, aElemType, aType.getMemorySpace());
       Value bS_0 = createSubview2D(ifB, ifL, b, c0, c0, kE_0, nE_0, bElemType, bType.getMemorySpace());
       Value aL_0 = createSubview2D(ifB, ifL, aL1_0, c0, c0, kE_0, mE_0, aElemType, l1SpaceAttr);
       Value bL_0 = createSubview2D(ifB, ifL, bL1_0, c0, c0, kE_0, nE_0, bElemType, l1SpaceAttr);
@@ -204,7 +228,7 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
       
       ifB.create<scf::IfOp>(ifL, has_k1_global, [&](OpBuilder &innerB, Location innerL) {
          Value kE_1 = createMinIndex(innerB, innerL, innerB.create<arith::SubIOp>(innerL, dimK, k1_global), tk);
-         Value aS_1 = createSubview2D(innerB, innerL, a, k1_global, c0, kE_1, mE_0, aElemType, aType.getMemorySpace());
+         Value aS_1 = createSubview2D(innerB, innerL, aTrans, k1_global, c0, kE_1, mE_0, aElemType, aType.getMemorySpace());
          Value bS_1 = createSubview2D(innerB, innerL, b, k1_global, c0, kE_1, nE_0, bElemType, bType.getMemorySpace());
          Value aL_1 = createSubview2D(innerB, innerL, aL1_1, c0, c0, kE_1, mE_0, aElemType, l1SpaceAttr);
          Value bL_1 = createSubview2D(innerB, innerL, bL1_1, c0, c0, kE_1, nE_0, bElemType, l1SpaceAttr);
@@ -271,7 +295,7 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
 
           ifB.create<scf::IfOp>(ifL, do_k1_fetch, [&](OpBuilder &innerB, Location innerL) {
              Value k1_eff = createMinIndex(innerB, innerL, innerB.create<arith::SubIOp>(innerL, dimK, k1), tk);
-             Value aS1 = createSubview2D(innerB, innerL, a, k1, i, k1_eff, mE, aElemType, aType.getMemorySpace());
+             Value aS1 = createSubview2D(innerB, innerL, aTrans, k1, i, k1_eff, mE, aElemType, aType.getMemorySpace());
              Value bS1 = createSubview2D(innerB, innerL, b, k1, j, k1_eff, nE, bElemType, bType.getMemorySpace());
              Value aL1 = createSubview2D(innerB, innerL, a_f, c0, c0, k1_eff, mE, aElemType, l1SpaceAttr);
              Value bL1 = createSubview2D(innerB, innerL, b_f, c0, c0, k1_eff, nE, bElemType, l1SpaceAttr);
@@ -284,7 +308,7 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
                 ifB.create<arith::CmpIOp>(ifL, arith::CmpIPredicate::eq, has_k1, false_val), has_next_mn);
 
           ifB.create<scf::IfOp>(ifL, do_next_mn, [&](OpBuilder &innerB, Location innerL) {
-             Value aS1 = createSubview2D(innerB, innerL, a, c0, fetch_i, fetch_k0_eff, fetch_mE, aElemType, aType.getMemorySpace());
+             Value aS1 = createSubview2D(innerB, innerL, aTrans, c0, fetch_i, fetch_k0_eff, fetch_mE, aElemType, aType.getMemorySpace());
              Value bS1 = createSubview2D(innerB, innerL, b, c0, fetch_j, fetch_k0_eff, fetch_nE, bElemType, bType.getMemorySpace());
              Value aL1 = createSubview2D(innerB, innerL, a_f, c0, c0, fetch_k0_eff, fetch_mE, aElemType, l1SpaceAttr);
              Value bL1 = createSubview2D(innerB, innerL, b_f, c0, c0, fetch_k0_eff, fetch_nE, bElemType, l1SpaceAttr);
@@ -307,7 +331,6 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
         nB.create<func::CallOp>(nL, hwBarrierFn, ValueRange{});
 
         nB.create<scf::IfOp>(nL, isCore0, [&](OpBuilder &ifB, Location ifL) {
-           
             Value do_next_mn = ifB.create<arith::AndIOp>(ifL, 
                 ifB.create<arith::CmpIOp>(ifL, arith::CmpIPredicate::eq, has_k1, false_val), has_next_mn);
             Value wait_k1 = ifB.create<arith::OrIOp>(ifL, has_k1, do_next_mn);
@@ -343,9 +366,7 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
                ifB.create<scf::IfOp>(ifL, needs_add, [&](OpBuilder &innerB, Location innerL) {
                    Value cAccS = createSubview2D(innerB, innerL, c_acc_L, c0, c0, mE, nE, cElemType, l1SpaceAttr);
                    Value cTmpS = createSubview2D(innerB, innerL, c_last_L, c0, c0, mE, nE, cElemType, l1SpaceAttr);
-
                    innerB.create<spatz::MatrixAddOp>(innerL, cAccS, cTmpS, mE, nE, builder.getI64IntegerAttr(64), builder.getI32IntegerAttr(dtC_val));
-                   
                    innerB.create<scf::YieldOp>(innerL);
                });
 
@@ -358,7 +379,7 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
 
                ifB.create<scf::IfOp>(ifL, has_next_k, [&](OpBuilder &innerB, Location innerL) {
                    Value nk_eff = createMinIndex(innerB, innerL, innerB.create<arith::SubIOp>(innerL, dimK, next_k), tk);
-                   Value aSn = createSubview2D(innerB, innerL, a, next_k, i, nk_eff, mE, aElemType, aType.getMemorySpace());
+                   Value aSn = createSubview2D(innerB, innerL, aTrans, next_k, i, nk_eff, mE, aElemType, aType.getMemorySpace());
                    Value bSn = createSubview2D(innerB, innerL, b, next_k, j, nk_eff, nE, bElemType, bType.getMemorySpace());
                    Value aLn = createSubview2D(innerB, innerL, a_f_nxt, c0, c0, nk_eff, mE, aElemType, l1SpaceAttr);
                    Value bLn = createSubview2D(innerB, innerL, b_f_nxt, c0, c0, nk_eff, nE, bElemType, l1SpaceAttr);
@@ -368,7 +389,7 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
                });
 
                ifB.create<scf::IfOp>(ifL, do_next_mn_k, [&](OpBuilder &innerB, Location innerL) {
-                   Value aS1 = createSubview2D(innerB, innerL, a, c0, fetch_i, fetch_k0_eff, fetch_mE, aElemType, aType.getMemorySpace());
+                   Value aS1 = createSubview2D(innerB, innerL, aTrans, c0, fetch_i, fetch_k0_eff, fetch_mE, aElemType, aType.getMemorySpace());
                    Value bS1 = createSubview2D(innerB, innerL, b, c0, fetch_j, fetch_k0_eff, fetch_nE, bElemType, bType.getMemorySpace());
                    Value aL1 = createSubview2D(innerB, innerL, a_f_nxt, c0, c0, fetch_k0_eff, fetch_mE, aElemType, l1SpaceAttr);
                    Value bL1 = createSubview2D(innerB, innerL, b_f_nxt, c0, c0, fetch_k0_eff, fetch_nE, bElemType, l1SpaceAttr);
@@ -425,9 +446,7 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
             ifB.create<scf::IfOp>(ifL, k_needs_add, [&](OpBuilder &innerB, Location innerL) {
                Value cAccS = createSubview2D(innerB, innerL, k_c_acc, c0, c0, mE, nE, cElemType, l1SpaceAttr);
                Value cTmpS = createSubview2D(innerB, innerL, k_c_last, c0, c0, mE, nE, cElemType, l1SpaceAttr);
-
                innerB.create<spatz::MatrixAddOp>(innerL, cAccS, cTmpS, mE, nE, builder.getI64IntegerAttr(64), builder.getI32IntegerAttr(dtC_val));
-               
                innerB.create<scf::YieldOp>(innerL);
             });
             
@@ -482,6 +501,8 @@ struct LowerLinalgMatmulToQuadrilateroPass : public LowerLinalgMatmulToQuadrilat
     });
 
     builder.create<func::CallOp>(loc, hwBarrierFn, ValueRange{});
+
+    builder.create<memref::DeallocOp>(loc, aTrans);
 
     op.erase(); 
     return success();

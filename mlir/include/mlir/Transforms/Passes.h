@@ -90,6 +90,10 @@ createInlinerPass(llvm::StringMap<OpPassManager> opPipelines,
 /// Creates a pass to lower linalg.matmul to Quadrilatero TCDM tiling.
 std::unique_ptr<Pass> createLowerLinalgMatmulToQuadrilateroPass();
 
+/// Creates a pass to lower linalg.matmul to Quadrilatero TCDM tiling without
+/// transposing the LHS.
+std::unique_ptr<Pass> createLowerLinalgMatmulToQuadrilateroNoTransposePass();
+
 std::unique_ptr<Pass> createLowerSpatzMatrixAddPass();
 
 /// Creates a pass which performs sparse conditional constant propagation over

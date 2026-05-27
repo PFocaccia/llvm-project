@@ -8,6 +8,7 @@ add_mlir_library(MLIRTransforms
   LocationSnapshot.cpp
   LoopInvariantCodeMotion.cpp
   LowerLinalgMatmulToQuadrilatero.cpp
+  LowerLinalgMatmulToQuadrilateroNoTranspose.cpp
   LowerSpatzMatrixAdd.cpp
   OpStats.cpp
   SCCP.cpp

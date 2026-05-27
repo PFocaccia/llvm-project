@@ -46,14 +46,20 @@ static bool isSupportedSdmaTwodCopy(memref::CopyOp op, unsigned l1MemorySpace) {
   return srcType.getElementType() == dstType.getElementType();
 }
 
-struct SnitchL1AllocOpLowering : public AllocLikeOpLLVMLowering {
-  
-  SnitchL1AllocOpLowering(LLVMTypeConverter &converter) : AllocLikeOpLLVMLowering(memref::AllocOp::getOperationName(), converter) {}
+struct SnitchAllocOpLowering : public AllocLikeOpLLVMLowering {
+  unsigned l1MemorySpace;
+
+  SnitchAllocOpLowering(LLVMTypeConverter &converter, unsigned l1MemorySpace) 
+      : AllocLikeOpLLVMLowering(memref::AllocOp::getOperationName(), converter),
+        l1MemorySpace(l1MemorySpace) {}
 
   std::tuple<Value, Value> allocateBuffer(ConversionPatternRewriter &rewriter, Location loc, Value sizeBytes, Operation *op) const override {
     
     auto allocOp = cast<memref::AllocOp>(op);
     auto memRefType = allocOp.getType();
+    unsigned memSpace = memRefType.getMemorySpaceAsInt();
+
+    StringRef allocFuncName = (memSpace == l1MemorySpace) ? "snrt_l1alloc" : "snrt_l3alloc";
 
     Type elementPtrType = getElementPtrType(memRefType);
     
@@ -63,7 +69,7 @@ struct SnitchL1AllocOpLowering : public AllocLikeOpLLVMLowering {
     auto voidPtrTy = getVoidPtrType();
     auto llvmVoidTy = LLVM::LLVMVoidType::get(ctx);
 
-    LLVM::lookupOrCreateFn(module, "snrt_l1alloc", {getIndexType()}, voidPtrTy);
+    LLVM::lookupOrCreateFn(module, allocFuncName, {getIndexType()}, voidPtrTy);
     LLVM::lookupOrCreateFn(module, "snrt_cluster_core_idx", {}, i32Ty);
     LLVM::lookupOrCreateFn(module, "snrt_cluster_hw_barrier", {}, llvmVoidTy);
 
@@ -91,7 +97,7 @@ struct SnitchL1AllocOpLowering : public AllocLikeOpLLVMLowering {
     rewriter.create<LLVM::CondBrOp>(loc, isCore0, allocBlock, barrierBlock);
 
     rewriter.setInsertionPointToEnd(allocBlock);
-    Value rawPtr = rewriter.create<LLVM::CallOp>(loc, TypeRange{voidPtrTy}, SymbolRefAttr::get(ctx, "snrt_l1alloc"), ValueRange{sizeBytes}).getResult(0);
+    Value rawPtr = rewriter.create<LLVM::CallOp>(loc, TypeRange{voidPtrTy}, SymbolRefAttr::get(ctx, allocFuncName), ValueRange{sizeBytes}).getResult(0);
     rewriter.create<LLVM::StoreOp>(loc, rawPtr, globalPtr); 
     rewriter.create<LLVM::BrOp>(loc, ValueRange(), barrierBlock);
 
@@ -106,7 +112,17 @@ struct SnitchL1AllocOpLowering : public AllocLikeOpLLVMLowering {
     rewriter.create<LLVM::BrOp>(loc, ValueRange(), exitBlock);
 
     rewriter.setInsertionPointToStart(exitBlock);
-    Value allocatedPtr = rewriter.create<LLVM::AddrSpaceCastOp>(loc, elementPtrType, sharedPtr);
+    
+    unsigned srcSpace = sharedPtr.getType().cast<LLVM::LLVMPointerType>().getAddressSpace();
+    unsigned dstSpace = elementPtrType.cast<LLVM::LLVMPointerType>().getAddressSpace();
+    
+    Value allocatedPtr;
+    
+    if (srcSpace == dstSpace) {
+        allocatedPtr = rewriter.create<LLVM::BitcastOp>(loc, elementPtrType, sharedPtr);
+    } else {
+        allocatedPtr = rewriter.create<LLVM::AddrSpaceCastOp>(loc, elementPtrType, sharedPtr);
+    }
     
     return std::make_tuple(allocatedPtr, allocatedPtr);
   }
@@ -409,7 +425,7 @@ struct ConvertSnitchMemoryToLLVMPass : public ConvertSnitchMemoryToLLVMBase<Conv
     LLVMTypeConverter typeConverter(&getContext(), options, &dataLayoutAnalysis);
 
     RewritePatternSet patterns(&getContext());
-    patterns.add<SnitchL1AllocOpLowering>(typeConverter);
+    patterns.add<SnitchAllocOpLowering>(typeConverter, l1MemorySpace);
     patterns.add<SnitchL1DeallocOpLowering>(typeConverter);
     patterns.add<SnitchSdmaTwodCopyOpLowering>(typeConverter, l1MemorySpace);
     patterns.add<SnitchDmaStartOpLowering>(typeConverter, l1MemorySpace);
@@ -419,13 +435,16 @@ struct ConvertSnitchMemoryToLLVMPass : public ConvertSnitchMemoryToLLVMBase<Conv
     target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
 
     target.addDynamicallyLegalOp<memref::AllocOp>([&](memref::AllocOp allocOp) {
-      return allocOp.getType().getMemorySpaceAsInt() != l1MemorySpace;
+      unsigned space = allocOp.getType().getMemorySpaceAsInt();
+      return space != l1MemorySpace && space != 0; 
     });
 
     target.addDynamicallyLegalOp<memref::DeallocOp>(
         [&](memref::DeallocOp deallocOp) {
           auto memRefType = deallocOp.memref().getType().dyn_cast<MemRefType>();
-          return !memRefType || memRefType.getMemorySpaceAsInt() != l1MemorySpace;
+          if (!memRefType) return true;
+          unsigned space = memRefType.getMemorySpaceAsInt();
+          return space != l1MemorySpace && space != 0;
         });
 
     target.addDynamicallyLegalOp<memref::CopyOp>([&](memref::CopyOp copyOp) {
