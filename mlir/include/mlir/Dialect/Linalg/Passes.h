@@ -50,6 +50,9 @@ std::unique_ptr<OperationPass<func::FuncOp>> createLinalgPromotionPass();
 std::unique_ptr<OperationPass<func::FuncOp>>
 createLinalgInlineScalarOperandsPass();
 
+std::unique_ptr<OperationPass<func::FuncOp>>
+createLinalgFoldConstantTransposePass();
+
 /// Create a pass to convert Linalg operations to scf.for loops and
 /// memref.load/memref.store accesses.
 std::unique_ptr<OperationPass<func::FuncOp>> createConvertLinalgToLoopsPass();

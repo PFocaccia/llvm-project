@@ -129,6 +129,16 @@ def LinalgInlineScalarOperands : Pass<"linalg-inline-scalar-operands", "FuncOp">
   ];
 }
 
+def LinalgFoldConstantTranspose
+    : Pass<"linalg-fold-constant-transpose", "FuncOp"> {
+  let summary = "Fold constant linalg.generic transpose operations";
+  let constructor = "mlir::createLinalgFoldConstantTransposePass()";
+  let dependentDialects = [
+    "arith::ArithmeticDialect",
+    "linalg::LinalgDialect"
+  ];
+}
+
 def LinalgLowerToAffineLoops : Pass<"convert-linalg-to-affine-loops", "FuncOp"> {
   let summary = "Lower the operations from the linalg dialect into affine "
                 "loops";
