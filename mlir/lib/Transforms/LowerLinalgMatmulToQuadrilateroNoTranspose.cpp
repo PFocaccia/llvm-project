@@ -153,6 +153,7 @@ struct LowerLinalgMatmulToQuadrilateroNoTransposePass
     Value tm_idx = builder.create<arith::ConstantIndexOp>(loc, tileMVal);
     Value tn_idx = builder.create<arith::ConstantIndexOp>(loc, tileNVal);
     Value tk_idx = builder.create<arith::ConstantIndexOp>(loc, tileKVal);
+    Value tk2_idx = builder.create<arith::ConstantIndexOp>(loc, tileKVal * 2);
     Value tk2_i32 = builder.create<arith::ConstantIntOp>(loc, tileKVal * 2, 32);
 
     Value dimK_idx = builder.create<memref::DimOp>(loc, a, 0);
@@ -393,61 +394,102 @@ struct LowerLinalgMatmulToQuadrilateroNoTransposePass
         b1.create<scf::ForOp>(l1, c0_idx, dimM_idx, tm_idx, loopArgs,
             [&](OpBuilder &lbM, Location lM, Value m_idx, ValueRange argsM) {
                 
+                Value mOff = lbM.create<arith::IndexCastOp>(lM, i32Ty, m_idx);
+                Value mE = createMinI32(lbM, lM, lbM.create<arith::SubIOp>(lM, dimM, mOff), tm_i32);
+                Value mE_idx = lbM.create<arith::IndexCastOp>(lM, indexTy, mE);
+                
                 auto loopN = lbM.create<scf::ForOp>(lM, c0_idx, dimN_idx, tn_idx, argsM,
                     [&](OpBuilder &lbN, Location lN, Value n_idx, ValueRange argsN) {
                         
-                        auto loopK = lbN.create<scf::ForOp>(lN, c0_idx, dimK_idx, tk_idx, argsN,
+                        Value nOff = lbN.create<arith::IndexCastOp>(lN, i32Ty, n_idx);
+                        Value nE = createMinI32(lbN, lN, lbN.create<arith::SubIOp>(lN, dimN, nOff), tn_i32);
+                        Value nE_idx = lbN.create<arith::IndexCastOp>(lN, indexTy, nE);
+                        
+                        auto loopK = lbN.create<scf::ForOp>(lN, c0_idx, dimK_idx, tk2_idx, argsN,
                             [&](OpBuilder &lbK, Location ll, Value k_idx, ValueRange argsK) {
                                 
                                 Value acc_id = argsK[0]; Value p1_id = argsK[1]; Value p2_id = argsK[2];
                                 Value flatIdx = argsK[3];
 
-                                Value mOff = lbK.create<arith::IndexCastOp>(ll, i32Ty, m_idx);
-                                Value nOff = lbK.create<arith::IndexCastOp>(ll, i32Ty, n_idx);
                                 Value kOff = lbK.create<arith::IndexCastOp>(ll, i32Ty, k_idx);
-
-                                Value c_acc = resolveBuf(lbK, ll, acc_id);
-                                Value c_pong1 = resolveBuf(lbK, ll, p1_id);
 
                                 Value parity = lbK.create<arith::RemUIOp>(ll, flatIdx, c2_i32);
                                 Value is_even = lbK.create<arith::CmpIOp>(ll, arith::CmpIPredicate::eq, parity, c0_i32);
+
+                                Value aL1_curr = lbK.create<arith::SelectOp>(ll, is_even, aL1_0, aL1_1);
+                                Value bL1_curr = lbK.create<arith::SelectOp>(ll, is_even, bL1_0, bL1_1);
+                                Value aL1_next = lbK.create<arith::SelectOp>(ll, is_even, aL1_1, aL1_0);
+                                Value bL1_next = lbK.create<arith::SelectOp>(ll, is_even, bL1_1, bL1_0);
+
+                                Value c_acc_0 = resolveBuf(lbK, ll, acc_id);
+                                Value c_pong1_0 = resolveBuf(lbK, ll, p1_id);
+
+                                Value kE_0 = createMinI32(lbK, ll, lbK.create<arith::SubIOp>(ll, dimK, kOff), tk_i32);
+                                Value kE_idx_0 = lbK.create<arith::IndexCastOp>(ll, indexTy, kE_0);
+
+                                Value is_k0_0 = lbK.create<arith::CmpIOp>(ll, arith::CmpIPredicate::eq, kOff, c0_i32);
+
+                                Value aSub_0 = createSubview2D(lbK, ll, aL1_curr, c0_idx, c0_idx, kE_idx_0, mE_idx, aElemType, l1SpaceAttr);
+                                Value bSub_0 = createSubview2D(lbK, ll, bL1_curr, c0_idx, c0_idx, kE_idx_0, nE_idx, bElemType, l1SpaceAttr);
                                 
-                                Value a_curr = lbK.create<arith::SelectOp>(ll, is_even, aL1_0, aL1_1);
-                                Value b_curr = lbK.create<arith::SelectOp>(ll, is_even, bL1_0, bL1_1);
-
-                                Value mE = createMinI32(lbK, ll, lbK.create<arith::SubIOp>(ll, dimM, mOff), tm_i32);
-                                Value nE = createMinI32(lbK, ll, lbK.create<arith::SubIOp>(ll, dimN, nOff), tn_i32);
-                                Value kE = createMinI32(lbK, ll, lbK.create<arith::SubIOp>(ll, dimK, kOff), tk_i32);
-
-                                Value mE_idx = lbK.create<arith::IndexCastOp>(ll, indexTy, mE);
-                                Value nE_idx = lbK.create<arith::IndexCastOp>(ll, indexTy, nE);
-                                Value kE_idx = lbK.create<arith::IndexCastOp>(ll, indexTy, kE);
-
-                                Value is_k0 = lbK.create<arith::CmpIOp>(ll, arith::CmpIPredicate::eq, kOff, c0_i32);
-
-                                Value aSub = createSubview2D(lbK, ll, a_curr, c0_idx, c0_idx, kE_idx, mE_idx, aElemType, l1SpaceAttr);
-                                Value bSub = createSubview2D(lbK, ll, b_curr, c0_idx, c0_idx, kE_idx, nE_idx, bElemType, l1SpaceAttr);
+                                Value cTarget_0 = lbK.create<arith::SelectOp>(ll, is_k0_0, c_acc_0, c_pong1_0);
+                                Value cSub_0 = createSubview2D(lbK, ll, cTarget_0, c0_idx, c0_idx, mE_idx, nE_idx, cElemType, l1SpaceAttr);
                                 
-                                Value cTarget = lbK.create<arith::SelectOp>(ll, is_k0, c_acc, c_pong1);
-                                Value cSub = createSubview2D(lbK, ll, cTarget, c0_idx, c0_idx, mE_idx, nE_idx, cElemType, l1SpaceAttr);
-                                
-                                lbK.create<quadrilatero::TcdmMatmulMemRefOp>(ll, aSub, bSub, cSub, mE_idx, nE_idx, kE_idx,
+                                lbK.create<quadrilatero::TcdmMatmulMemRefOp>(ll, aSub_0, bSub_0, cSub_0, mE_idx, nE_idx, kE_idx_0,
                                     lbK.create<arith::ConstantIndexOp>(ll, shiftVal),
                                     builder.getI32IntegerAttr(dtC_val), builder.getI32IntegerAttr(dtA_val), builder.getI32IntegerAttr(dtB_val));
 
                                 lbK.create<func::CallOp>(ll, hwBarrierFn, ValueRange{});
 
-                                Value nextFlatIdx = lbK.create<arith::AddIOp>(ll, flatIdx, c1_i32);
-                                Value next_acc_id = acc_id; Value next_p1_id = p2_id; Value next_p2_id = p1_id;
+                                Value nextFlatIdx_0 = lbK.create<arith::AddIOp>(ll, flatIdx, c1_i32);
+                                Value next_acc_id_0 = acc_id; Value next_p1_id_0 = p2_id; Value next_p2_id_0 = p1_id;
 
-                                Value next_kOff = lbK.create<arith::AddIOp>(ll, kOff, tk_i32);
-                                Value is_last_k = lbK.create<arith::CmpIOp>(ll, arith::CmpIPredicate::sge, next_kOff, dimK);
+                                Value next_kOff_0 = lbK.create<arith::AddIOp>(ll, kOff, tk_i32);
+                                Value is_last_k_0 = lbK.create<arith::CmpIOp>(ll, arith::CmpIPredicate::sge, next_kOff_0, dimK);
                                 
-                                Value final_acc_id = lbK.create<arith::SelectOp>(ll, is_last_k, p2_id, next_acc_id);
-                                Value final_p1_id  = lbK.create<arith::SelectOp>(ll, is_last_k, acc_id, next_p1_id);
-                                Value final_p2_id  = lbK.create<arith::SelectOp>(ll, is_last_k, p1_id, next_p2_id);
+                                Value final_acc_id_0 = lbK.create<arith::SelectOp>(ll, is_last_k_0, p2_id, next_acc_id_0);
+                                Value final_p1_id_0  = lbK.create<arith::SelectOp>(ll, is_last_k_0, acc_id, next_p1_id_0);
+                                Value final_p2_id_0  = lbK.create<arith::SelectOp>(ll, is_last_k_0, p1_id, next_p2_id_0);
 
-                                lbK.create<scf::YieldOp>(ll, ValueRange{final_acc_id, final_p1_id, final_p2_id, nextFlatIdx});
+                                Value has_odd_tile = lbK.create<arith::CmpIOp>(ll, arith::CmpIPredicate::slt, next_kOff_0, dimK);
+                                
+                                SmallVector<Type, 4> ifTypes = {i32Ty, i32Ty, i32Ty, i32Ty};
+                                auto oddIf = lbK.create<scf::IfOp>(ll, ifTypes, has_odd_tile,
+                                    [&](OpBuilder &ob, Location ol) {
+                                        Value c_pong1_1 = resolveBuf(ob, ol, final_p1_id_0);
+
+                                        Value kE_1 = createMinI32(ob, ol, ob.create<arith::SubIOp>(ol, dimK, next_kOff_0), tk_i32);
+                                        Value kE_idx_1 = ob.create<arith::IndexCastOp>(ol, indexTy, kE_1);
+
+                                        Value aSub_1 = createSubview2D(ob, ol, aL1_next, c0_idx, c0_idx, kE_idx_1, mE_idx, aElemType, l1SpaceAttr);
+                                        Value bSub_1 = createSubview2D(ob, ol, bL1_next, c0_idx, c0_idx, kE_idx_1, nE_idx, bElemType, l1SpaceAttr);
+                                        
+                                        Value cSub_1 = createSubview2D(ob, ol, c_pong1_1, c0_idx, c0_idx, mE_idx, nE_idx, cElemType, l1SpaceAttr);
+                                        
+                                        ob.create<quadrilatero::TcdmMatmulMemRefOp>(ol, aSub_1, bSub_1, cSub_1, mE_idx, nE_idx, kE_idx_1,
+                                            ob.create<arith::ConstantIndexOp>(ol, shiftVal),
+                                            builder.getI32IntegerAttr(dtC_val), builder.getI32IntegerAttr(dtA_val), builder.getI32IntegerAttr(dtB_val));
+
+                                        ob.create<func::CallOp>(ol, hwBarrierFn, ValueRange{});
+
+                                        Value nextFlatIdx_1 = ob.create<arith::AddIOp>(ol, nextFlatIdx_0, c1_i32);
+                                        Value next_acc_id_1 = final_acc_id_0; Value next_p1_id_1 = final_p2_id_0; Value next_p2_id_1 = final_p1_id_0;
+
+                                        Value next_kOff_1 = ob.create<arith::AddIOp>(ol, next_kOff_0, tk_i32);
+                                        Value is_last_k_1 = ob.create<arith::CmpIOp>(ol, arith::CmpIPredicate::sge, next_kOff_1, dimK);
+                                        
+                                        Value final_acc_id_1 = ob.create<arith::SelectOp>(ol, is_last_k_1, final_p2_id_0, next_acc_id_1);
+                                        Value final_p1_id_1  = ob.create<arith::SelectOp>(ol, is_last_k_1, final_acc_id_0, next_p1_id_1);
+                                        Value final_p2_id_1  = ob.create<arith::SelectOp>(ol, is_last_k_1, final_p1_id_0, next_p2_id_1);
+
+                                        ob.create<scf::YieldOp>(ol, ValueRange{final_acc_id_1, final_p1_id_1, final_p2_id_1, nextFlatIdx_1});
+                                    },
+                                    [&](OpBuilder &ob, Location ol) {
+                                        ob.create<scf::YieldOp>(ol, ValueRange{final_acc_id_0, final_p1_id_0, final_p2_id_0, nextFlatIdx_0});
+                                    }
+                                );
+
+                                lbK.create<scf::YieldOp>(ll, oddIf.getResults());
                             });
                         lbN.create<scf::YieldOp>(lN, loopK.getResults());
                     });
