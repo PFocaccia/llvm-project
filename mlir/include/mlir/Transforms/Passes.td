@@ -307,8 +307,8 @@ def SymbolPrivatize : Pass<"symbol-privatize"> {
   }
 
   def LowerSpatzMatrixAdd
-      : Pass<"lower-spatz-matrix-add", "func::FuncOp"> {
-    let summary = "Lower spatz.matrix_add to loops with Spatz VLE/VSE";
+      : Pass<"lower-spatz-op", "func::FuncOp"> {
+    let summary = "Lower Spatz ops to loops with Spatz VLE/VSE";
     let constructor = "mlir::createLowerSpatzMatrixAddPass()";
     let dependentDialects = [
       "arith::ArithmeticDialect",

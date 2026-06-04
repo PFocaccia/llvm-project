@@ -31,12 +31,6 @@ struct MatrixAddLowering : public OpRewritePattern<spatz::MatrixAddOp> {
     if (!accType) return failure();
 
     auto elemType = accType.getElementType();
-    auto vecLenAttr = op->getAttrOfType<IntegerAttr>("vecLen");
-    
-    if (!vecLenAttr || vecLenAttr.getInt() <= 0) return failure();
-
-    auto memVectorType = VectorType::get({8}, elemType, {true});
-
     Type computeElemType = elemType;
     bool isFloat = false;
 
@@ -58,7 +52,18 @@ struct MatrixAddLowering : public OpRewritePattern<spatz::MatrixAddOp> {
       }
     }
 
-    auto computeVectorType = VectorType::get({8}, computeElemType, {true});
+    auto vecLenAttr = op->getAttrOfType<IntegerAttr>("vecLen");
+    if (!vecLenAttr || vecLenAttr.getInt() <= 0) {
+      return failure(); 
+    }
+    
+    int64_t exactElements = vecLenAttr.getInt();
+    
+    int64_t vscale = 8;
+    int64_t baseElements = exactElements / vscale;
+
+    auto memVectorType = VectorType::get({baseElements}, elemType, {true});
+    auto computeVectorType = VectorType::get({baseElements}, computeElemType, {true});
 
     Location loc = op.getLoc();
     Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
@@ -67,9 +72,8 @@ struct MatrixAddLowering : public OpRewritePattern<spatz::MatrixAddOp> {
     Type i32Type = rewriter.getI32Type();
     Value vlI32 = rewriter.create<arith::IndexCastOp>(loc, i32Type, op.cols());
 
-    rewriter.create<scf::ForOp>(loc, c0, op.rows(), c1, ValueRange{}, [&](OpBuilder &builder, Location bodyLoc, Value iv, ValueRange) {
+    rewriter.create<scf::ForOp>(loc, c0, op.rows(), c1, ValueRange{}, [&](OpBuilder &builder, Location bodyLoc, Value rowIdx, ValueRange) {
           
-          Value rowIdx = iv;
           Value indices[] = {rowIdx, c0};
 
           Value accVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.accMatrix(), indices, vlI32);
