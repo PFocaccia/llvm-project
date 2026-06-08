@@ -61,10 +61,79 @@ struct LowerLinalgMatmulToQuadrilateroPass
 
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
+    
+    SmallVector<linalg::BatchMatmulOp, 4> batchMatmuls;
+    funcOp.walk([&](linalg::BatchMatmulOp op) { batchMatmuls.push_back(op); });
+    for (linalg::BatchMatmulOp op : batchMatmuls) {
+      if (failed(lowerBatchMatmul(op))) signalPassFailure();
+    }
+
     SmallVector<linalg::MatmulOp, 4> matmuls;
     funcOp.walk([&](linalg::MatmulOp op) { matmuls.push_back(op); });
-    for (linalg::MatmulOp op : matmuls)
+    for (linalg::MatmulOp op : matmuls) {
       if (failed(lowerMatmul(op))) signalPassFailure();
+    }
+  }
+
+  LogicalResult lowerBatchMatmul(linalg::BatchMatmulOp op) {
+    if (op.getNumInputs() != 2 || op.getNumOutputs() != 1) return failure();
+
+    Value a = op.inputs()[0]; 
+    Value b = op.inputs()[1]; 
+    Value c = op.outputs()[0];
+
+    auto aType = a.getType().dyn_cast<MemRefType>();
+    auto bType = b.getType().dyn_cast<MemRefType>();
+    auto cType = c.getType().dyn_cast<MemRefType>();
+    
+    if (!aType || !bType || !cType || aType.getRank() != 3) return failure();
+
+    OpBuilder builder(op);
+    Location loc = op.getLoc();
+
+    Value batchSize;
+    if (aType.isDynamicDim(0)) {
+      batchSize = builder.create<memref::DimOp>(loc, a, 0);
+    } else {
+      batchSize = builder.create<arith::ConstantIndexOp>(loc, aType.getDimSize(0));
+    }
+
+    Value c0 = builder.create<arith::ConstantIndexOp>(loc, 0);
+    Value c1 = builder.create<arith::ConstantIndexOp>(loc, 1);
+
+    auto loop = builder.create<scf::ForOp>(loc, c0, batchSize, c1);
+    OpBuilder::InsertionGuard guard(builder);
+    builder.setInsertionPointToStart(loop.getBody());
+
+    Value b_idx = loop.getInductionVar();
+
+    auto create2DSubview = [&](Value val) -> Value {
+      auto type = val.getType().cast<MemRefType>();
+      
+      auto getDim = [&](int dim) -> OpFoldResult {
+          if (type.isDynamicDim(dim))
+              return builder.create<memref::DimOp>(loc, val, dim).getResult();
+          return builder.getIndexAttr(type.getDimSize(dim));
+      };
+
+      SmallVector<OpFoldResult> offsets = {b_idx, builder.getIndexAttr(0), builder.getIndexAttr(0)};
+      SmallVector<OpFoldResult> sizes = {builder.getIndexAttr(1), getDim(1), getDim(2)};
+      SmallVector<OpFoldResult> strides = {builder.getIndexAttr(1), builder.getIndexAttr(1), builder.getIndexAttr(1)};
+
+      auto targetType = memref::SubViewOp::inferRankReducedResultType(
+          2, type, offsets, sizes, strides).cast<MemRefType>();
+
+      return builder.create<memref::SubViewOp>(loc, targetType, val, offsets, sizes, strides);
+    };
+
+    Value a2D = create2DSubview(a);
+    Value b2D = create2DSubview(b);
+    Value c2D = create2DSubview(c);
+
+    builder.create<linalg::MatmulOp>(loc, ValueRange{a2D, b2D}, ValueRange{c2D});
+
+    op.erase();
+    return success();
   }
 
   LogicalResult lowerMatmul(linalg::MatmulOp op) {
