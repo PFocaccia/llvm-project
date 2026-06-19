@@ -74,13 +74,56 @@ def VSEOp : Spatz_Op<"vse"> {
   let hasVerifier = 1;
 }
 
+def VMulVFOp : Spatz_Op<"vmul_vf", [AllTypesMatch<["passthru", "lhs", "res"]>]> {
+  let summary = "Spatz integer vector multiply by scalar (vf)";
+  let arguments = (ins
+    VectorOf<[AnySignlessInteger]>:$passthru,
+    VectorOf<[AnySignlessInteger]>:$lhs,
+    AnySignlessInteger:$scalar,
+    AnySignlessIntegerOrIndex:$vl
+  );
+  let results = (outs VectorOf<[AnySignlessInteger]>:$res);
+  let assemblyFormat = "$passthru `,` $lhs `,` $scalar `,` $vl attr-dict `:` type($passthru) `,` type($scalar) `,` type($vl)";
+  let hasVerifier = 1;
+}
+
+def VFMulVFOp : Spatz_Op<"vfmul_vf", [AllTypesMatch<["passthru", "lhs", "res"]>]> {
+  let summary = "Spatz floating-point vector multiply by scalar (vf)";
+  let arguments = (ins
+    VectorOf<[AnyFloat]>:$passthru,
+    VectorOf<[AnyFloat]>:$lhs,
+    AnyFloat:$scalar,
+    AnySignlessIntegerOrIndex:$vl
+  );
+  let results = (outs VectorOf<[AnyFloat]>:$res);
+  let assemblyFormat = "$passthru `,` $lhs `,` $scalar `,` $vl attr-dict `:` type($passthru) `,` type($scalar) `,` type($vl)";
+  let hasVerifier = 1;
+}
 
 def MatrixAddOp : Spatz_Op<"matrix_add"> {
   let summary = "Add two matrices in TCDM using Spatz";
   let arguments = (ins AnyMemRef:$accMatrix, AnyMemRef:$tmpMatrix,
                        Index:$rows, Index:$cols, I64Attr:$vecLen, 
-                       I32Attr:$dataType); // <-- Aggiunto il tipo di dato per propagare l'fp8/fp32
+                       I32Attr:$dataType); 
   let assemblyFormat = "$accMatrix `,` $tmpMatrix `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($tmpMatrix) `,` type($rows) `,` type($cols)";
+  let hasVerifier = 1;
+}
+
+def MatrixVectorAddOp : Spatz_Op<"matrix_vector_add"> {
+  let summary = "Add a 1D vector to all rows of a 2D matrix in TCDM using Spatz";
+  let arguments = (ins AnyMemRef:$accMatrix, AnyMemRef:$addVector,
+                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
+                       I32Attr:$dataType);
+  let assemblyFormat = "$accMatrix `,` $addVector `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($addVector) `,` type($rows) `,` type($cols)";
+  let hasVerifier = 1;
+}
+
+def MatrixScalarMulOp : Spatz_Op<"matrix_scalar_mul"> {
+  let summary = "Multiply a 2D matrix by a scalar in TCDM using Spatz";
+  let arguments = (ins AnyMemRef:$accMatrix, AnyType:$scalar,
+                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
+                       I32Attr:$dataType);
+  let assemblyFormat = "$accMatrix `,` $scalar `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($scalar) `,` type($rows) `,` type($cols)";
   let hasVerifier = 1;
 }
 

@@ -123,6 +123,34 @@ LogicalResult spatz::VSEOp::verify() {
   return verifySupportedVectorElemType(vecTy.getElementType(), *this, "vse");
 }
 
+LogicalResult spatz::VMulVFOp::verify() {
+  auto vecTy = getResult().getType().dyn_cast<VectorType>();
+  if (!vecTy) return emitOpError("requires vector result type");
+
+  if (vecTy.getRank() != 1) return emitOpError("requires 1-D vector result type");
+
+  if (failed(verifyIntegerVectorElemType(vecTy.getElementType(), *this, "vmul_vf"))) return failure();
+
+  Type scalarTy = scalar().getType();
+  if (!scalarTy.isSignlessInteger()) return emitOpError("scalar must be signless integer");
+
+  return success();
+}
+
+LogicalResult spatz::VFMulVFOp::verify() {
+  auto vecTy = getResult().getType().dyn_cast<VectorType>();
+  if (!vecTy) return emitOpError("requires vector result type");
+
+  if (vecTy.getRank() != 1) return emitOpError("requires 1-D vector result type");
+
+  if (failed(verifyFloatVectorElemType(vecTy.getElementType(), *this, "vfmul_vf"))) return failure();
+
+  Type scalarTy = scalar().getType();
+  if (!scalarTy.isa<FloatType>()) return emitOpError("scalar must be floating-point");
+
+  return success();
+}
+
 LogicalResult spatz::MatrixAddOp::verify() {
   
   auto accType = accMatrix().getType().dyn_cast<MemRefType>();
@@ -136,6 +164,37 @@ LogicalResult spatz::MatrixAddOp::verify() {
 
   auto vecLenAttr = (*this)->getAttrOfType<IntegerAttr>("vecLen");
   
+  if (!vecLenAttr || vecLenAttr.getInt() <= 0) return emitOpError("requires positive 'vecLen' attribute");
+
+  return success();
+}
+
+LogicalResult spatz::MatrixVectorAddOp::verify() {
+  auto accType = accMatrix().getType().dyn_cast<MemRefType>();
+  auto vecType = addVector().getType().dyn_cast<MemRefType>();
+  
+  if (!accType || !vecType) return emitOpError("requires memref operands");
+  if (accType.getRank() != 2) return emitOpError("requires rank-2 memref for matrix");
+  if (vecType.getRank() != 1) return emitOpError("requires rank-1 memref for vector");
+  if (accType.getElementType() != vecType.getElementType()) 
+    return emitOpError("requires matching element types between matrix and vector");
+
+  auto vecLenAttr = (*this)->getAttrOfType<IntegerAttr>("vecLen");
+  if (!vecLenAttr || vecLenAttr.getInt() <= 0) return emitOpError("requires positive 'vecLen' attribute");
+
+  return success();
+}
+
+LogicalResult spatz::MatrixScalarMulOp::verify() {
+  auto accType = accMatrix().getType().dyn_cast<MemRefType>();
+  if (!accType) return emitOpError("requires memref for matrix");
+  if (accType.getRank() != 2) return emitOpError("requires rank-2 memref for matrix");
+
+  Type scalarTy = scalar().getType();
+  if (accType.getElementType() != scalarTy) 
+    return emitOpError("scalar type must match matrix element type");
+
+  auto vecLenAttr = (*this)->getAttrOfType<IntegerAttr>("vecLen");
   if (!vecLenAttr || vecLenAttr.getInt() <= 0) return emitOpError("requires positive 'vecLen' attribute");
 
   return success();

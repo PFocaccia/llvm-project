@@ -148,6 +148,41 @@ struct LowerLinalgMatmulToQuadrilateroPass
     auto cType = c.getType().dyn_cast<MemRefType>();
     if (!aOrigType || !bType || !cType) return failure();
 
+    bool hasScale = false;
+    Value scaleVal = nullptr;
+    Operation* scaleOpToErase = nullptr;
+
+    bool hasBias = false;
+    Value biasVal = nullptr;
+    Operation* addOpToErase = nullptr;
+
+    Value mainC = c;
+    if (auto subview = c.getDefiningOp<memref::SubViewOp>()) {
+      mainC = subview.source();
+    }
+
+    for (Operation* user : mainC.getUsers()) {
+      if (auto genericOp = dyn_cast<linalg::GenericOp>(user)) {
+        auto &block = genericOp.getRegion().front();
+        if (block.getOperations().size() == 2) {
+          if (genericOp.getNumInputs() == 1) {
+            if (auto mulfOp = dyn_cast<arith::MulFOp>(block.front())) {
+              hasScale = true;
+              scaleVal = (mulfOp.getLhs() == block.getArgument(0)) ? mulfOp.getRhs() : mulfOp.getLhs();
+              scaleOpToErase = genericOp;
+            }
+          }
+          else if (genericOp.getNumInputs() == 2) {
+            if (auto addfOp = dyn_cast<arith::AddFOp>(block.front())) {
+              hasBias = true;
+              biasVal = genericOp.getInputOperand(1)->get();
+              addOpToErase = genericOp;
+            }
+          }
+        }
+      }
+    }
+
     OpBuilder builder(op);
     Location loc = op.getLoc();
     MLIRContext *ctx = builder.getContext();
@@ -254,6 +289,30 @@ struct LowerLinalgMatmulToQuadrilateroPass
     Value tagC   = builder.create<memref::AllocaOp>(loc, tagType); 
 
     Value c0_idx = builder.create<arith::ConstantIndexOp>(loc, 0);
+    Value c1_idx = builder.create<arith::ConstantIndexOp>(loc, 1);
+
+    Value bias2D = nullptr;
+    Value biasL1_1D = nullptr;
+    Value biasL1_2D = nullptr;
+    Value tagBias = nullptr;
+    Attribute biasMemSpace = nullptr;
+
+    if (hasBias) {
+        auto biasType = biasVal.getType().cast<MemRefType>();
+        biasMemSpace = biasType.getMemorySpace();
+        
+        SmallVector<ReassociationIndices> reassoc = {{0, 1}};
+        auto bias2DType = MemRefType::get({1, biasType.getShape()[0]}, biasType.getElementType(), MemRefLayoutAttrInterface{}, biasMemSpace);
+        bias2D = builder.create<memref::ExpandShapeOp>(loc, bias2DType, biasVal, reassoc);
+
+        auto biasL1Type_1D = MemRefType::get({tileNVal}, cElemType, MemRefLayoutAttrInterface{}, l1SpaceAttr);
+        biasL1_1D = builder.create<memref::AllocOp>(loc, biasL1Type_1D);
+        
+        auto biasL1Type_2D = MemRefType::get({1, tileNVal}, cElemType, MemRefLayoutAttrInterface{}, l1SpaceAttr);
+        biasL1_2D = builder.create<memref::ExpandShapeOp>(loc, biasL1Type_2D, biasL1_1D, reassoc);
+        
+        tagBias = builder.create<memref::AllocaOp>(loc, tagType);
+    }
 
     Value c0_i32 = builder.create<arith::ConstantIntOp>(loc, 0, 32);
     Value c1_i32 = builder.create<arith::ConstantIntOp>(loc, 1, 32);
@@ -389,6 +448,28 @@ struct LowerLinalgMatmulToQuadrilateroPass
                                         
                                         Value cOut = createSubview2D(stB, stL, c, p_mOff_idx, p_nOff_idx, p_mE_idx, p_nE_idx, cElemType, cType.getMemorySpace());
                                         Value cSrc = createSubview2D(stB, stL, c_pong1, c0_idx, c0_idx, p_mE_idx, p_nE_idx, cElemType, l1SpaceAttr);
+
+                                        if (hasBias) {
+                                            Value biasSub2D = createSubview2D(stB, stL, bias2D, c0_idx, p_nOff_idx, c1_idx, p_nE_idx, cElemType, biasMemSpace);
+                                            Value biasL1Sub2D = createSubview2D(stB, stL, biasL1_2D, c0_idx, c0_idx, c1_idx, p_nE_idx, cElemType, l1SpaceAttr);
+                                            Value szBias_idx = stB.create<arith::IndexCastOp>(stL, indexTy, p_nE);
+
+                                            stB.create<memref::DmaStartOp>(stL, biasSub2D, ValueRange{c0_idx, c0_idx}, biasL1Sub2D, ValueRange{c0_idx, c0_idx}, szBias_idx, tagBias, ValueRange{c0_idx});
+                                            stB.create<memref::DmaWaitOp>(stL, tagBias, ValueRange{c0_idx}, szBias_idx);
+
+                                            SmallVector<OpFoldResult, 1> offsets1D = {c0_idx};
+                                            SmallVector<OpFoldResult, 1> sizes1D = {p_nE_idx};
+                                            SmallVector<OpFoldResult, 1> strides1D = {stB.getIndexAttr(1)};
+                                            Value biasL1Sub1D = stB.create<memref::SubViewOp>(stL, biasL1_1D, offsets1D, sizes1D, strides1D);
+
+                                            stB.create<spatz::MatrixVectorAddOp>(stL, cSrc, biasL1Sub1D, p_mE_idx, p_nE_idx, 
+                                                builder.getI64IntegerAttr(64), builder.getI32IntegerAttr(dtC_val));
+                                        }
+
+                                        if (hasScale) {
+                                            stB.create<spatz::MatrixScalarMulOp>(stL, cSrc, scaleVal, p_mE_idx, p_nE_idx, 
+                                                builder.getI64IntegerAttr(64), builder.getI32IntegerAttr(dtC_val));
+                                        }
                                         
                                         Value cSz_i32 = stB.create<arith::MulIOp>(stL, p_mE, p_nE);
                                         Value cSz_idx = stB.create<arith::IndexCastOp>(stL, indexTy, cSz_i32);
@@ -489,6 +570,28 @@ struct LowerLinalgMatmulToQuadrilateroPass
 
         Value cOut = createSubview2D(b0, l0, c, m_lastOff_idx, n_lastOff_idx, mE_last_idx, nE_last_idx, cElemType, cType.getMemorySpace());
         Value cSrc = createSubview2D(b0, l0, res_c_pong1, c0_idx, c0_idx, mE_last_idx, nE_last_idx, cElemType, l1SpaceAttr);
+        
+        if (hasBias) {
+            Value biasSub2D = createSubview2D(b0, l0, bias2D, c0_idx, n_lastOff_idx, c1_idx, nE_last_idx, cElemType, biasMemSpace);
+            Value biasL1Sub2D = createSubview2D(b0, l0, biasL1_2D, c0_idx, c0_idx, c1_idx, nE_last_idx, cElemType, l1SpaceAttr);
+            Value szBias_idx = b0.create<arith::IndexCastOp>(l0, indexTy, nE_last);
+
+            b0.create<memref::DmaStartOp>(l0, biasSub2D, ValueRange{c0_idx, c0_idx}, biasL1Sub2D, ValueRange{c0_idx, c0_idx}, szBias_idx, tagBias, ValueRange{c0_idx});
+            b0.create<memref::DmaWaitOp>(l0, tagBias, ValueRange{c0_idx}, szBias_idx);
+
+            SmallVector<OpFoldResult, 1> offsets1D = {c0_idx};
+            SmallVector<OpFoldResult, 1> sizes1D = {nE_last_idx};
+            SmallVector<OpFoldResult, 1> strides1D = {b0.getIndexAttr(1)};
+            Value biasL1Sub1D = b0.create<memref::SubViewOp>(l0, biasL1_1D, offsets1D, sizes1D, strides1D);
+
+            b0.create<spatz::MatrixVectorAddOp>(l0, cSrc, biasL1Sub1D, mE_last_idx, nE_last_idx, 
+                builder.getI64IntegerAttr(64), builder.getI32IntegerAttr(dtC_val));
+        }
+
+        if (hasScale) {
+            b0.create<spatz::MatrixScalarMulOp>(l0, cSrc, scaleVal, mE_last_idx, nE_last_idx, 
+                builder.getI64IntegerAttr(64), builder.getI32IntegerAttr(dtC_val));
+        }
         
         Value cSz_i32 = b0.create<arith::MulIOp>(l0, mE_last, nE_last);
         Value cSz_idx = b0.create<arith::IndexCastOp>(l0, indexTy, cSz_i32);
@@ -611,6 +714,26 @@ struct LowerLinalgMatmulToQuadrilateroPass
     });
 
     builder.create<func::CallOp>(loc, hwBarrierFn, ValueRange{});
+
+    if (scaleOpToErase) {
+      if (auto linalgOp = dyn_cast<linalg::LinalgOp>(scaleOpToErase)) {
+        if (linalgOp.getNumOutputs() == 1) {
+          Value genericOut = linalgOp.getOutputOperand(0)->get();
+          if (genericOut != mainC) { genericOut.replaceAllUsesWith(mainC); }
+        }
+      }
+      scaleOpToErase->erase();
+    }
+
+    if (addOpToErase) {
+      if (auto linalgOp = dyn_cast<linalg::LinalgOp>(addOpToErase)) {
+        if (linalgOp.getNumOutputs() == 1) {
+          Value genericOut = linalgOp.getOutputOperand(0)->get();
+          if (genericOut != mainC) { genericOut.replaceAllUsesWith(mainC); }
+        }
+      }
+      addOpToErase->erase();
+    }
 
     op.erase();
     return success();
