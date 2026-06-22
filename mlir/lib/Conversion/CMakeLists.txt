@@ -1,6 +1,7 @@
 add_subdirectory(AffineToStandard)
 add_subdirectory(ArithmeticToLLVM)
 add_subdirectory(ArithmeticToSPIRV)
+add_subdirectory(ArithToSnitch)
 add_subdirectory(ArmNeon2dToIntr)
 add_subdirectory(AsyncToLLVM)
 add_subdirectory(BufferizationToMemRef)

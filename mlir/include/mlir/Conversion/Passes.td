@@ -509,6 +509,19 @@ def ConvertSnitchMemoryToLLVM : Pass<"convert-snitch-memory-to-llvm", "ModuleOp"
 }
 
 //===----------------------------------------------------------------------===//
+// ArithToSnitch
+//===----------------------------------------------------------------------===//
+
+def ConvertArithToSnitch : Pass<"lower-arith-to-snitch", "ModuleOp"> {
+  let summary = "Lower unsupported arith ops to bare-metal function calls for Snitch";
+  let constructor = "mlir::createConvertArithToSnitchPass()";
+  let dependentDialects = [
+    "func::FuncDialect",
+    "arith::ArithmeticDialect"
+  ];
+}
+
+//===----------------------------------------------------------------------===//
 // QuadrilateroToLLVM
 //===----------------------------------------------------------------------===//
 
