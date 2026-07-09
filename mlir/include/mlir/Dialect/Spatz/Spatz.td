@@ -100,6 +100,83 @@ def VFMulVFOp : Spatz_Op<"vfmul_vf", [AllTypesMatch<["passthru", "lhs", "res"]>]
   let hasVerifier = 1;
 }
 
+// Maps to llvm.riscv.vfmax.* (unmasked form).
+def VFMaxVVOp : Spatz_Op<"vfmax_vv", [AllTypesMatch<["passthru", "lhs", "rhs", "res"]>]> {
+  let summary = "Spatz floating-point vector maximum (vv)";
+  let arguments = (ins
+    VectorOf<[AnyFloat]>:$passthru,
+    VectorOf<[AnyFloat]>:$lhs,
+    VectorOf<[AnyFloat]>:$rhs,
+    AnySignlessIntegerOrIndex:$vl
+  );
+  let results = (outs VectorOf<[AnyFloat]>:$res);
+  let assemblyFormat = "$passthru `,` $lhs `,` $rhs `,` $vl attr-dict `:` type($passthru) `,` type($vl)";
+}
+
+// Maps to llvm.riscv.vfsub.* (unmasked form).
+def VFSubVVOp : Spatz_Op<"vfsub_vv", [AllTypesMatch<["passthru", "lhs", "rhs", "res"]>]> {
+  let summary = "Spatz floating-point vector subtract (vv)";
+  let arguments = (ins
+    VectorOf<[AnyFloat]>:$passthru,
+    VectorOf<[AnyFloat]>:$lhs,
+    VectorOf<[AnyFloat]>:$rhs,
+    AnySignlessIntegerOrIndex:$vl
+  );
+  let results = (outs VectorOf<[AnyFloat]>:$res);
+  let assemblyFormat = "$passthru `,` $lhs `,` $rhs `,` $vl attr-dict `:` type($passthru) `,` type($vl)";
+}
+
+// Maps to llvm.riscv.vfmul.* (unmasked form).
+def VFMulVVOp : Spatz_Op<"vfmul_vv", [AllTypesMatch<["passthru", "lhs", "rhs", "res"]>]> {
+  let summary = "Spatz floating-point vector multiply (vv)";
+  let arguments = (ins
+    VectorOf<[AnyFloat]>:$passthru,
+    VectorOf<[AnyFloat]>:$lhs,
+    VectorOf<[AnyFloat]>:$rhs,
+    AnySignlessIntegerOrIndex:$vl
+  );
+  let results = (outs VectorOf<[AnyFloat]>:$res);
+  let assemblyFormat = "$passthru `,` $lhs `,` $rhs `,` $vl attr-dict `:` type($passthru) `,` type($vl)";
+}
+
+// Maps to llvm.riscv.vfdiv.* (unmasked form).
+def VFDivVVOp : Spatz_Op<"vfdiv_vv", [AllTypesMatch<["passthru", "lhs", "rhs", "res"]>]> {
+  let summary = "Spatz floating-point vector divide (vv)";
+  let arguments = (ins
+    VectorOf<[AnyFloat]>:$passthru,
+    VectorOf<[AnyFloat]>:$lhs,
+    VectorOf<[AnyFloat]>:$rhs,
+    AnySignlessIntegerOrIndex:$vl
+  );
+  let results = (outs VectorOf<[AnyFloat]>:$res);
+  let assemblyFormat = "$passthru `,` $lhs `,` $rhs `,` $vl attr-dict `:` type($passthru) `,` type($vl)";
+}
+
+// Spatz splat scalar into vector
+def VFMvVFOp : Spatz_Op<"vfmv_v_f", [AllTypesMatch<["passthru", "res"]>]> {
+  let summary = "Spatz splat scalar float into vector";
+  let arguments = (ins
+    VectorOf<[AnyFloat]>:$passthru,
+    AnyFloat:$scalar,
+    AnySignlessIntegerOrIndex:$vl
+  );
+  let results = (outs VectorOf<[AnyFloat]>:$res);
+  let assemblyFormat = "$passthru `,` $scalar `,` $vl attr-dict `:` type($passthru) `,` type($scalar) `,` type($vl)";
+}
+
+// Vector Exponential
+def VFExpVOp : Spatz_Op<"vfexp_v", [AllTypesMatch<["passthru", "src", "res"]>]> {
+  let summary = "Spatz floating-point vector exponential (base e)";
+  let arguments = (ins
+    VectorOf<[AnyFloat]>:$passthru,
+    VectorOf<[AnyFloat]>:$src,
+    AnySignlessIntegerOrIndex:$vl
+  );
+  let results = (outs VectorOf<[AnyFloat]>:$res);
+  let assemblyFormat = "$passthru `,` $src `,` $vl attr-dict `:` type($passthru) `,` type($vl)";
+}
+
+
 def MatrixAddOp : Spatz_Op<"matrix_add"> {
   let summary = "Add two matrices in TCDM using Spatz";
   let arguments = (ins AnyMemRef:$accMatrix, AnyMemRef:$tmpMatrix,
@@ -125,6 +202,30 @@ def MatrixScalarMulOp : Spatz_Op<"matrix_scalar_mul"> {
                        I32Attr:$dataType);
   let assemblyFormat = "$accMatrix `,` $scalar `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($scalar) `,` type($rows) `,` type($cols)";
   let hasVerifier = 1;
+}
+
+def MatrixSubOp : Spatz_Op<"matrix_sub"> {
+  let summary = "Subtract two matrices in TCDM using Spatz";
+  let arguments = (ins AnyMemRef:$accMatrix, AnyMemRef:$tmpMatrix,
+                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
+                       I32Attr:$dataType); 
+  let assemblyFormat = "$accMatrix `,` $tmpMatrix `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($tmpMatrix) `,` type($rows) `,` type($cols)";
+}
+
+def MatrixExpOp : Spatz_Op<"matrix_exp"> {
+  let summary = "Apply exponential to a matrix in TCDM using Spatz";
+  let arguments = (ins AnyMemRef:$matrix,
+                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
+                       I32Attr:$dataType);
+  let assemblyFormat = "$matrix `,` $rows `,` $cols attr-dict `:` type($matrix) `,` type($rows) `,` type($cols)";
+}
+
+def MatrixColumnMaxOp : Spatz_Op<"matrix_column_max"> {
+  let summary = "Find the maximum of each column in a 2D matrix using Spatz";
+  let arguments = (ins AnyMemRef:$matrix, AnyMemRef:$maxVector,
+                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
+                       I32Attr:$dataType);
+  let assemblyFormat = "$matrix `,` $maxVector `,` $rows `,` $cols attr-dict `:` type($matrix) `,` type($maxVector) `,` type($rows) `,` type($cols)";
 }
 
 #endif // SPATZ

@@ -261,15 +261,17 @@ struct SnitchDmaStartOpLowering : public ConvertOpToLLVMPattern<memref::DmaStart
     
     auto srcType = op.getSrcMemRef().getType().dyn_cast<MemRefType>();
     auto dstType = op.getDstMemRef().getType().dyn_cast<MemRefType>();
-    if (!srcType || !dstType || srcType.getRank() != 2 || dstType.getRank() != 2) return failure();
+    if (!srcType || !dstType) return failure();
+    
+    unsigned srcRank = srcType.getRank();
+    unsigned dstRank = dstType.getRank();
+    if (srcRank > 2 || dstRank > 2 || srcRank != dstRank) return failure();
 
     unsigned srcSpace = srcType.getMemorySpaceAsInt();
     unsigned dstSpace = dstType.getMemorySpaceAsInt();
     if (!((srcSpace == l1MemorySpace && dstSpace == 0) || (srcSpace == 0 && dstSpace == l1MemorySpace))) return failure();
 
     auto loc = op.getLoc();
-    unsigned srcRank = srcType.getRank();
-    unsigned dstRank = dstType.getRank();
     
     Value srcAdaptor = adaptor.getOperands()[0];
     Value dstAdaptor = adaptor.getOperands()[1 + srcRank];
@@ -297,20 +299,34 @@ struct SnitchDmaStartOpLowering : public ConvertOpToLLVMPattern<memref::DmaStart
     Value dstAddr64 = castIntToWidth(rewriter, loc, dstAddr, 64);
 
     Value elemSizeIdx = getSizeInBytes(loc, srcType.getElementType(), rewriter);
-    Value rowElems =    srcDesc.size(rewriter, loc, 1);
-    Value nReps =       srcDesc.size(rewriter, loc, 0);
+    
+    Value rowElems;
+    Value nReps;
+    Value srcStrideElems;
+    Value dstStrideElems;
+    
+    auto llvmIndexTy = getTypeConverter()->getIndexType();
+    
+    if (srcRank == 1) {
+        rowElems = srcDesc.size(rewriter, loc, 0);
+        nReps = rewriter.create<LLVM::ConstantOp>(loc, llvmIndexTy, rewriter.getIntegerAttr(llvmIndexTy, 1)); 
+        srcStrideElems = rowElems;
+        dstStrideElems = rowElems;
+    } else {
+        rowElems = srcDesc.size(rewriter, loc, 1);
+        nReps = srcDesc.size(rewriter, loc, 0);
+        srcStrideElems = srcDesc.stride(rewriter, loc, 0);
+        dstStrideElems = dstDesc.stride(rewriter, loc, 0);
+    }
 
-    Value srcStrideElems = srcDesc.stride(rewriter, loc, 0);
-    Value dstStrideElems = dstDesc.stride(rewriter, loc, 0);
+    Value rowBytes = rewriter.create<LLVM::MulOp>(loc, rowElems, elemSizeIdx);
+    Value srcStrideBytes = rewriter.create<LLVM::MulOp>(loc, srcStrideElems, elemSizeIdx);
+    Value dstStrideBytes = rewriter.create<LLVM::MulOp>(loc, dstStrideElems, elemSizeIdx);
 
-    Value rowBytes =        rewriter.create<LLVM::MulOp>(loc, rowElems, elemSizeIdx);
-    Value srcStrideBytes =  rewriter.create<LLVM::MulOp>(loc, srcStrideElems, elemSizeIdx);
-    Value dstStrideBytes =  rewriter.create<LLVM::MulOp>(loc, dstStrideElems, elemSizeIdx);
-
-    Value size32 =          castIntToWidth(rewriter, loc, rowBytes, 32);
-    Value srcStride32 =     castIntToWidth(rewriter, loc, srcStrideBytes, 32);
-    Value dstStride32 =     castIntToWidth(rewriter, loc, dstStrideBytes, 32);
-    Value nReps32 =         castIntToWidth(rewriter, loc, nReps, 32);
+    Value size32 = castIntToWidth(rewriter, loc, rowBytes, 32);
+    Value srcStride32 = castIntToWidth(rewriter, loc, srcStrideBytes, 32);
+    Value dstStride32 = castIntToWidth(rewriter, loc, dstStrideBytes, 32);
+    Value nReps32 = castIntToWidth(rewriter, loc, nReps, 32);
 
     auto i32Ty = IntegerType::get(rewriter.getContext(), 32);
 
@@ -331,11 +347,11 @@ struct SnitchDmaStartOpLowering : public ConvertOpToLLVMPattern<memref::DmaStart
         srcStride32 = rewriter.create<LLVM::MulOp>(loc, srcStride32, multVal);
         dstStride32 = rewriter.create<LLVM::MulOp>(loc, dstStride32, multVal);
         
-        auto indexTy = srcOffset.getType();
+        auto indexTyWidth = srcOffset.getType();
         Value srcHorizElems = rewriter.create<LLVM::URemOp>(loc, srcOffset, srcStrideElems);
         Value dstHorizElems = rewriter.create<LLVM::URemOp>(loc, dstOffset, dstStrideElems);
         
-        Value multMinusOne = rewriter.create<LLVM::ConstantOp>(loc, indexTy, rewriter.getIntegerAttr(indexTy, multiplier - 1));
+        Value multMinusOne = rewriter.create<LLVM::ConstantOp>(loc, indexTyWidth, rewriter.getIntegerAttr(indexTyWidth, multiplier - 1));
         Value srcExtraElems = rewriter.create<LLVM::MulOp>(loc, srcHorizElems, multMinusOne);
         Value dstExtraElems = rewriter.create<LLVM::MulOp>(loc, dstHorizElems, multMinusOne);
         
