@@ -189,7 +189,6 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
 
     auto getCoreIdxFn = getOrInsertFn("snrt_cluster_core_idx", builder.getFunctionType({}, {i32Ty}));
     auto hwBarrierFn = getOrInsertFn("snrt_cluster_hw_barrier", builder.getFunctionType({}, {}));
-    auto expFn = getOrInsertFn("baremetal_exp", builder.getFunctionType({builder.getF32Type()}, {builder.getF32Type()}));
     auto l1ResetFn = getOrInsertFn("snrt_l1alloc_reset", builder.getFunctionType({}, {}));
 
     Value cid = builder.create<func::CallOp>(loc, getCoreIdxFn, ValueRange{}).getResult(0);
@@ -250,6 +249,9 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
     Value m_val   = builder.create<memref::AllocOp>(loc, mlL1Type);
     Value l_val   = builder.create<memref::AllocOp>(loc, mlL1Type);
     Value m_block = builder.create<memref::AllocOp>(loc, mBlockType);
+    Value sum_buf = builder.create<memref::AllocOp>(loc, mBlockType);
+    Value m_diff_buf = builder.create<memref::AllocOp>(loc, mBlockType);
+    Value diff_prev_buf = builder.create<memref::AllocOp>(loc, mBlockType);
 
     auto tagType = MemRefType::get({1}, builder.getI32Type());
     Value tagQ = builder.create<memref::AllocaOp>(loc, tagType);
@@ -406,62 +408,28 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
                         bKV.create<func::CallOp>(lKV, hwBarrierFn, ValueRange{});
 
                         bKV.create<scf::IfOp>(lKV, isCore0, [&](OpBuilder &b0, Location l0) {
-                            
+    
                             b0.create<spatz::MatrixScalarMulOp>(l0, s_buf, m_scale, nE_idx, mE_idx, b0.getI64IntegerAttr(HW_Stride_Elements), b0.getI32IntegerAttr(dt_val));
-                            
                             b0.create<spatz::MatrixColumnMaxOp>(l0, s_buf, m_block, nE_idx, mE_idx, b0.getI64IntegerAttr(HW_Stride_Elements), b0.getI32IntegerAttr(dt_val));
+                                                
+                            auto strideAttr = b0.getI64IntegerAttr(HW_Stride_Elements);
+                            auto dtAttr = b0.getI32IntegerAttr(dt_val);
                             
-                            b0.create<scf::ForOp>(l0, c0_idx, mE_idx, c1_idx, ValueRange{},
-                                [&](OpBuilder &bR, Location lR, Value r_idx, ValueRange) {
-                                    
-                                    Value m_blk = bR.create<memref::LoadOp>(lR, m_block, ValueRange{r_idx});
-                                    Value m_prev = bR.create<memref::LoadOp>(lR, m_val, ValueRange{r_idx});
-                                
-                                    Value is_gt = bR.create<arith::CmpFOp>(lR, arith::CmpFPredicate::UGT, m_blk, m_prev);
-                                    Value m_new = bR.create<arith::SelectOp>(lR, is_gt, m_blk, m_prev);
-                                    bR.create<memref::StoreOp>(lR, m_new, m_val, ValueRange{r_idx});
-                                
-                                    Value m_diff = bR.create<arith::SubFOp>(lR, m_prev, m_new);
-                                    Value diff_prev = bR.create<func::CallOp>(lR, expFn, ValueRange{m_diff}).getResult(0);
-                                
-                                    Value l_prev = bR.create<memref::LoadOp>(lR, l_val, ValueRange{r_idx});
-                                    Value l_scaled = bR.create<arith::MulFOp>(lR, l_prev, diff_prev);
-                                
-                                    bR.create<scf::ForOp>(lR, c0_idx, D_idx, c1_idx, ValueRange{},
-                                        [&](OpBuilder &bC, Location lC, Value d_idx, ValueRange) {
-                                            Value o = bC.create<memref::LoadOp>(lC, o_buf, ValueRange{r_idx, d_idx});
-                                            Value o_rescaled = bC.create<arith::MulFOp>(lC, o, diff_prev);
-                                            bC.create<memref::StoreOp>(lC, o_rescaled, o_buf, ValueRange{r_idx, d_idx});
-                                            bC.create<scf::YieldOp>(lC);
-                                        });
-                                    
-                                    Value local_sum = bR.create<memref::AllocaOp>(lR, MemRefType::get({1}, builder.getF32Type()));
-                                    bR.create<memref::StoreOp>(lR, f_zero, local_sum, ValueRange{c0_idx});
-                                    
-                                    bR.create<scf::ForOp>(lR, c0_idx, nE_idx, c1_idx, ValueRange{},
-                                        [&](OpBuilder &bC, Location lC, Value c_idx, ValueRange) {
-                                            Value s = bC.create<memref::LoadOp>(lC, s_buf, ValueRange{c_idx, r_idx});
-                                            if (hasBias) {
-                                                Value b_val = bC.create<memref::LoadOp>(lC, bias_curr, ValueRange{c_idx});
-                                                s = bC.create<arith::AddFOp>(lC, s, b_val);
-                                            }
-                                            Value sub_m = bC.create<arith::SubFOp>(lC, s, m_new);
-                                            Value exp_s = bC.create<func::CallOp>(lC, expFn, ValueRange{sub_m}).getResult(0);
-                                        
-                                            Value curr_sum = bC.create<memref::LoadOp>(lC, local_sum, ValueRange{c0_idx});
-                                            Value new_sum = bC.create<arith::AddFOp>(lC, curr_sum, exp_s);
-                                            bC.create<memref::StoreOp>(lC, new_sum, local_sum, ValueRange{c0_idx});
-                                        
-                                            bC.create<memref::StoreOp>(lC, exp_s, p_T, ValueRange{c_idx, r_idx});
-                                            bC.create<scf::YieldOp>(lC);
-                                        });
-                                    
-                                    Value loc_sum_val = bR.create<memref::LoadOp>(lR, local_sum, ValueRange{c0_idx});
-                                    Value l_new = bR.create<arith::AddFOp>(lR, l_scaled, loc_sum_val);
-                                    bR.create<memref::StoreOp>(lR, l_new, l_val, ValueRange{r_idx});
-                                    
-                                    bR.create<scf::YieldOp>(lR);
-                                });
+                            b0.create<spatz::VectorMaxUpdateOp>(l0, m_val, m_block, m_diff_buf, mE_idx, strideAttr, dtAttr);
+                            
+                            b0.create<spatz::VectorExpOp>(l0, m_diff_buf, diff_prev_buf, mE_idx, strideAttr, dtAttr);
+                            
+                            b0.create<spatz::VectorMulOp>(l0, l_val, diff_prev_buf, mE_idx, strideAttr, dtAttr);
+                            
+                            b0.create<spatz::MatrixRowScaleOp>(l0, o_buf, diff_prev_buf, mE_idx, D_idx, strideAttr, dtAttr);
+                        
+                            if (hasBias) {
+                                b0.create<spatz::MatrixExpReduceOp>(l0, s_buf, p_T, m_val, sum_buf, bias_curr, nE_idx, mE_idx, strideAttr, dtAttr);
+                            } else {
+                                b0.create<spatz::MatrixExpReduceOp>(l0, s_buf, p_T, m_val, sum_buf, Value(), nE_idx, mE_idx, strideAttr, dtAttr);
+                            }
+                        
+                            b0.create<spatz::VectorAddOp>(l0, l_val, sum_buf, mE_idx, strideAttr, dtAttr);
                             
                             b0.create<scf::YieldOp>(l0);
                         });
@@ -472,8 +440,7 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
                             Value pTSub = createSubview2D(b1, l1, p_T, c0_idx, c0_idx, nE_idx, mE_idx, elemType, l1SpaceAttr);
                             Value vSub  = createSubview2D(b1, l1, v_curr, c0_idx, c0_idx, nE_idx, D_idx, elemType, l1SpaceAttr);
                             Value oTileSub = createSubview2D(b1, l1, o_tile, c0_idx, c0_idx, mE_idx, D_idx, elemType, l1SpaceAttr);
-                            b1.create<quadrilatero::TcdmMatmulMemRefOp>(l1, pTSub, vSub, oTileSub, mE_idx, D_idx, nE_idx,
-                                        shift_idx, builder.getI32IntegerAttr(dt_val), builder.getI32IntegerAttr(dt_val), builder.getI32IntegerAttr(dt_val));
+                            b1.create<quadrilatero::TcdmMatmulMemRefOp>(l1, pTSub, vSub, oTileSub, mE_idx, D_idx, nE_idx, shift_idx, builder.getI32IntegerAttr(dt_val), builder.getI32IntegerAttr(dt_val), builder.getI32IntegerAttr(dt_val));
                             b1.create<scf::YieldOp>(l1);
                         });
 
@@ -512,16 +479,8 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
                     });
 
                     bQ.create<scf::IfOp>(lQ, isCore0, [&](OpBuilder &b0, Location l0) {
-                    b0.create<scf::ForOp>(l0, c0_idx, mE_idx, c1_idx, ValueRange{}, [&](OpBuilder &bR, Location lR, Value r_idx, ValueRange) {
-                        Value l_final = bR.create<memref::LoadOp>(lR, l_val, ValueRange{r_idx});
-                        bR.create<scf::ForOp>(lR, c0_idx, D_idx, c1_idx, ValueRange{}, [&](OpBuilder &bC, Location lC, Value d_idx, ValueRange) {
-                            Value o = bC.create<memref::LoadOp>(lC, o_buf, ValueRange{r_idx, d_idx});
-                            Value o_norm = bC.create<arith::DivFOp>(lC, o, l_final);
-                            bC.create<memref::StoreOp>(lC, o_norm, o_buf, ValueRange{r_idx, d_idx});
-                            bC.create<scf::YieldOp>(lC);
-                        });
-                        bR.create<scf::YieldOp>(lR);
-                    });
+                        
+                    b0.create<spatz::MatrixRowDivOp>(l0, o_buf, l_val, mE_idx, D_idx, b0.getI64IntegerAttr(HW_Stride_Elements), b0.getI32IntegerAttr(dt_val));
 
                     Value oSub_out = createSubview3DTo2D(b0, l0, O_output, batch_idx, q_idx, c0_idx, mE_idx, D_idx);
                     Value oL1Sub = createSubview2D(b0, l0, o_buf, c0_idx, c0_idx, mE_idx, D_idx, elemType, l1SpaceAttr);
