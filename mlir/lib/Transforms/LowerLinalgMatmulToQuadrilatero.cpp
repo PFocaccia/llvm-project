@@ -67,12 +67,11 @@ static Value createSubview3DTo2D(OpBuilder &builder, Location loc, Value base, V
   SmallVector<OpFoldResult, 3> sizes = {builder.getIndexAttr(1), size1, size2}; 
   SmallVector<OpFoldResult, 3> strides = {builder.getIndexAttr(1), builder.getIndexAttr(1), builder.getIndexAttr(1)};
   
-  Value subview3D = builder.create<memref::SubViewOp>(loc, base, offsets, sizes, strides).getResult();
-
-  SmallVector<ReassociationIndices, 2> reassociation = {{0, 1}, {2}};
+  auto sourceType = base.getType().cast<MemRefType>();
   
-  return builder.create<memref::CollapseShapeOp>(loc, subview3D, reassociation).getResult();
-
+  auto resultType = memref::SubViewOp::inferRankReducedResultType( 2, sourceType, offsets, sizes, strides).cast<MemRefType>();
+      
+  return builder.create<memref::SubViewOp>(loc, resultType, base, offsets, sizes, strides).getResult();
 }
 
 static Value createSubview1D(OpBuilder &builder, Location loc, Value base, Value off0, Value size0,
@@ -143,6 +142,23 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
     }
 
     if (!matmul1Op) return failure();
+
+    bool hasSoftmaxDivision = false;
+    for (Operation *op : opsToErase) {
+        auto genericOp = dyn_cast<linalg::GenericOp>(op);
+        if (!genericOp)
+            continue;
+
+        genericOp.getRegion().walk([&](arith::DivFOp) {
+            hasSoftmaxDivision = true;
+        });
+
+        if (hasSoftmaxDivision)
+            break;
+    }
+
+    if (!hasSoftmaxDivision)
+        return failure();
     
     Value biasVal = nullptr;
     for (auto* op : opsToErase) {
@@ -278,6 +294,9 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
     Value dimSeq_idx = builder.create<memref::DimOp>(loc, Q_input, 1); 
     Value dimSeq = builder.create<arith::IndexCastOp>(loc, i32Ty, dimSeq_idx);
 
+    Value kSourceStrideIdx = builder.create<memref::DimOp>(loc, K_T_input, 2);
+    Value vSourceStrideIdx = builder.create<memref::DimOp>(loc, V_input, 2);
+
     builder.create<scf::ForOp>(loc, c0_idx, dimBatch_idx, c1_idx, ValueRange{},
         [&](OpBuilder &bB, Location lB, Value batch_idx, ValueRange argsB) {
             
@@ -322,8 +341,8 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
                     
                     Value szK_0_idx = b0.create<arith::IndexCastOp>(l0, indexTy, b0.create<arith::MulIOp>(l0, tk_i32, nE_0));
                     
-                    b0.create<memref::DmaStartOp>(l0, kSub_0, ValueRange{c0_idx, c0_idx}, kL1Sub_0, ValueRange{c0_idx, c0_idx}, szK_0_idx, tagK_0, ValueRange{c0_idx}, hw_stride_idx, nE_0_idx);
-                    b0.create<memref::DmaStartOp>(l0, vSub_0, ValueRange{c0_idx, c0_idx}, vL1Sub_0, ValueRange{c0_idx, c0_idx}, szK_0_idx, tagV_0, ValueRange{c0_idx}, hw_stride_idx, nE_0_idx);
+                    b0.create<memref::DmaStartOp>(l0, kSub_0, ValueRange{c0_idx, c0_idx}, kL1Sub_0, ValueRange{c0_idx, c0_idx}, szK_0_idx, tagK_0, ValueRange{c0_idx}, kSourceStrideIdx, nE_0_idx);
+                    b0.create<memref::DmaStartOp>(l0, vSub_0, ValueRange{c0_idx, c0_idx}, vL1Sub_0, ValueRange{c0_idx, c0_idx}, szK_0_idx, tagV_0, ValueRange{c0_idx}, vSourceStrideIdx, nE_0_idx);
                     
                     if (hasBias) {
                         Value biasSub_0 = createSubview1D(b0, l0, biasVal, c0_idx, nE_0_idx, elemType, biasVal.getType().cast<MemRefType>().getMemorySpace());
@@ -381,8 +400,8 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
                                 
                                 Value szN_idx = bN.create<arith::IndexCastOp>(lN, indexTy, bN.create<arith::MulIOp>(lN, tk_i32, n_nE));
                                 
-                                bN.create<memref::DmaStartOp>(lN, kSub_n, ValueRange{c0_idx, c0_idx}, kL1Sub_n, ValueRange{c0_idx, c0_idx}, szN_idx, tagK_n, ValueRange{c0_idx}, hw_stride_idx, n_nE_idx);
-                                bN.create<memref::DmaStartOp>(lN, vSub_n, ValueRange{c0_idx, c0_idx}, vL1Sub_n, ValueRange{c0_idx, c0_idx}, szN_idx, tagV_n, ValueRange{c0_idx}, hw_stride_idx, n_nE_idx);
+                                bN.create<memref::DmaStartOp>(lN, kSub_n, ValueRange{c0_idx, c0_idx}, kL1Sub_n, ValueRange{c0_idx, c0_idx}, szN_idx, tagK_n, ValueRange{c0_idx}, kSourceStrideIdx, n_nE_idx);
+                                bN.create<memref::DmaStartOp>(lN, vSub_n, ValueRange{c0_idx, c0_idx}, vL1Sub_n, ValueRange{c0_idx, c0_idx}, szN_idx, tagV_n, ValueRange{c0_idx}, vSourceStrideIdx, n_nE_idx);
                                 
                                 if (hasBias) {
                                     Value biasSub_n = createSubview1D(bN, lN, biasVal, next_kv_idx, n_nE_idx, elemType, biasVal.getType().cast<MemRefType>().getMemorySpace());
@@ -399,7 +418,7 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
                             Value kSub  = createSubview2D(b1, l1, k_curr, c0_idx, c0_idx, D_idx, nE_idx, elemType, l1SpaceAttr);
                             Value sTSub = createSubview2D(b1, l1, s_buf, c0_idx, c0_idx, nE_idx, mE_idx, elemType, l1SpaceAttr);
                             
-                            b1.create<quadrilatero::TcdmMatmulMemRefOp>(l1, kSub, qTSub, sTSub, mE_idx, nE_idx, D_idx,
+                            b1.create<quadrilatero::TcdmMatmulMemRefOp>(l1, kSub, qTSub, sTSub, nE_idx, mE_idx, D_idx,
                                         shift_idx, builder.getI32IntegerAttr(dt_val), builder.getI32IntegerAttr(dt_val), builder.getI32IntegerAttr(dt_val));
                             
                             b1.create<scf::YieldOp>(l1);
@@ -418,7 +437,7 @@ LogicalResult lowerFlashAttention(linalg::BatchMatmulOp matmul2Op, llvm::SmallPt
                             b0.create<spatz::VectorMaxUpdateOp>(l0, m_val, m_block, m_diff_buf, mE_idx, strideAttr, dtAttr);
                             
                             b0.create<spatz::VectorExpOp>(l0, m_diff_buf, diff_prev_buf, mE_idx, strideAttr, dtAttr);
-                            
+
                             b0.create<spatz::VectorMulOp>(l0, l_val, diff_prev_buf, mE_idx, strideAttr, dtAttr);
                             
                             b0.create<spatz::MatrixRowScaleOp>(l0, o_buf, diff_prev_buf, mE_idx, D_idx, strideAttr, dtAttr);

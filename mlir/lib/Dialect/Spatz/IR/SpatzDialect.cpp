@@ -199,3 +199,55 @@ LogicalResult spatz::MatrixScalarMulOp::verify() {
 
   return success();
 }
+
+LogicalResult spatz::LayerNormOp::verify() {
+  auto inputType = input().getType().dyn_cast<MemRefType>();
+  auto gammaType = gamma().getType().dyn_cast<MemRefType>();
+  auto betaType = beta().getType().dyn_cast<MemRefType>();
+  auto outputType = output().getType().dyn_cast<MemRefType>();
+
+  if (!inputType || !gammaType || !betaType || !outputType)
+    return emitOpError("expects memref operands");
+
+  if (inputType.getRank() != 3)
+    return emitOpError("input must have rank 3");
+
+  if (outputType.getRank() != 3)
+    return emitOpError("output must have rank 3");
+
+  if (gammaType.getRank() != 1 || betaType.getRank() != 1)
+    return emitOpError("gamma and beta must have rank 1");
+
+  if (!inputType.getElementType().isF32() ||
+      !outputType.getElementType().isF32() ||
+      !gammaType.getElementType().isF32() ||
+      !betaType.getElementType().isF32())
+    return emitOpError("currently supports only f32");
+
+  if (inputType.getShape() != outputType.getShape())
+    return emitOpError("input and output must have identical shapes");
+
+  int64_t hidden = inputType.getShape()[2];
+
+  if (!ShapedType::isDynamic(hidden)) {
+    int64_t gammaSize = gammaType.getShape()[0];
+    int64_t betaSize = betaType.getShape()[0];
+
+    if (!ShapedType::isDynamic(gammaSize) && gammaSize != hidden)
+      return emitOpError("gamma size must match hidden size");
+
+    if (!ShapedType::isDynamic(betaSize) && betaSize != hidden)
+      return emitOpError("beta size must match hidden size");
+
+    if (hidden > maxHidden())
+      return emitOpError("hidden dimension exceeds maxHidden");
+  }
+
+  if (tileRows() <= 0)
+    return emitOpError("tileRows must be positive");
+
+  if (maxHidden() <= 0)
+    return emitOpError("maxHidden must be positive");
+
+  return success();
+}

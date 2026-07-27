@@ -190,6 +190,24 @@ def VFCvtRtzXUFVOp : Spatz_Op<"vfcvt_rtz_xu_f_v"> {
   let assemblyFormat = "$passthru `,` $src `,` $vl attr-dict `:` type($passthru) `,` type($src) `,` type($vl) `,` type($res)";
 }
 
+// Maps to llvm.riscv.vfcvt.rtz.x.f.v (unmasked form)
+def VFCvtRtzXFVOp : Spatz_Op<"vfcvt_rtz_x_f_v"> {
+  let summary =
+      "Spatz convert float vector to signed int vector with truncation toward zero";
+
+  let arguments = (ins
+    VectorOf<[AnySignlessInteger]>:$passthru,
+    VectorOf<[AnyFloat]>:$src,
+    AnySignlessIntegerOrIndex:$vl
+  );
+
+  let results = (outs VectorOf<[AnySignlessInteger]>:$res);
+
+  let assemblyFormat =
+      "$passthru `,` $src `,` $vl attr-dict `:` "
+      "type($passthru) `,` type($src) `,` type($vl) `,` type($res)";
+}
+
 // Maps to llvm.riscv.vfsub.* (vector-scalar form)
 def VFSubVFOp : Spatz_Op<"vfsub_vf", [AllTypesMatch<["passthru", "lhs", "res"]>]> {
   let summary = "Spatz floating-point vector subtract by scalar (vf)";
@@ -204,16 +222,16 @@ def VFSubVFOp : Spatz_Op<"vfsub_vf", [AllTypesMatch<["passthru", "lhs", "res"]>]
 }
 
 // Maps to llvm.riscv.vfredusum.* (unordered reduction sum)
-def VFredUSumOp : Spatz_Op<"vfredusum_vs", [AllTypesMatch<["passthru", "vector", "scalar", "res"]>]> {
+def VFredUSumOp : Spatz_Op<"vfredusum_vs", [AllTypesMatch<["passthru", "scalar", "res"]>]> {
   let summary = "Spatz floating-point vector unordered reduction sum";
   let arguments = (ins
     VectorOf<[AnyFloat]>:$passthru,
     VectorOf<[AnyFloat]>:$vector,
-    VectorOf<[AnyFloat]>:$scalar, 
+    VectorOf<[AnyFloat]>:$scalar,
     AnySignlessIntegerOrIndex:$vl
   );
   let results = (outs VectorOf<[AnyFloat]>:$res);
-  let assemblyFormat = "$passthru `,` $vector `,` $scalar `,` $vl attr-dict `:` type($passthru) `,` type($vl)";
+  let assemblyFormat = "$passthru `,` $vector `,` $scalar `,` $vl attr-dict `:` type($passthru) `,` type($vector) `,` type($vl)";
 }
 
 def VFMvFSOp : Spatz_Op<"vfmv_f_s"> {
@@ -269,13 +287,6 @@ def MatrixSubOp : Spatz_Op<"matrix_sub"> {
   let assemblyFormat = "$accMatrix `,` $tmpMatrix `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($tmpMatrix) `,` type($rows) `,` type($cols)";
 }
 
-def MatrixExpOp : Spatz_Op<"matrix_exp"> {
-  let summary = "Apply exponential to a matrix in TCDM using Spatz";
-  let arguments = (ins AnyMemRef:$matrix,
-                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
-                       I32Attr:$dataType);
-  let assemblyFormat = "$matrix `,` $rows `,` $cols attr-dict `:` type($matrix) `,` type($rows) `,` type($cols)";
-}
 
 def MatrixExpReduceOp : Spatz_Op<"matrix_exp_reduce"> {
   let summary = "Apply exp to an entire matrix tile with optional bias, and reduce vertically into an array";
@@ -375,6 +386,24 @@ def MatrixRowDivOp : Spatz_Op<"matrix_row_div"> {
     I32Attr:$dataType
   );
   let assemblyFormat = "$matrix `,` $divVec `,` $rows `,` $cols attr-dict `:` type($matrix) `,` type($divVec) `,` type($rows) `,` type($cols)";
+}
+
+def LayerNormOp : Spatz_Op<"layer_norm"> {
+  let summary = "Fused single-core tiled LayerNorm using Spatz";
+
+  let arguments = (ins
+    AnyMemRef:$input,
+    AnyMemRef:$gamma,
+    AnyMemRef:$beta,
+    AnyMemRef:$output,
+    F32Attr:$epsilon,
+    I64Attr:$tileRows,
+    I64Attr:$maxHidden
+  );
+
+  let assemblyFormat = [{$input `,` $gamma `,` $beta `,` $output attr-dict `:` type($input) `,` type($gamma) `,` type($beta) `,` type($output) }];
+
+  let hasVerifier = 1;
 }
 
 #endif // SPATZ

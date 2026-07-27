@@ -129,23 +129,33 @@ struct SpatzVFAddVVLowering : public ConvertOpToLLVMPattern<spatz::VFAddVVOp> {
   using ConvertOpToLLVMPattern<spatz::VFAddVVOp>::ConvertOpToLLVMPattern;
 
   LogicalResult matchAndRewrite(spatz::VFAddVVOp op, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const override {
-    Type llvmResultType = typeConverter->convertType(op.getResult().getType());
+    
+    Type llvmResultType =typeConverter->convertType( op.getResult().getType());
+
+    if (!llvmResultType) return failure();
+
     ModuleOp module = op->getParentOfType<ModuleOp>();
 
-    auto vecTy = op.getResult().getType().cast<VectorType>();
-    
+    if (!module) return failure();
+
+    auto vecTy = op.getResult().getType().dyn_cast<VectorType>();
+
+    if (!vecTy) return failure();
+
     unsigned numElements = vecTy.getShape()[0];
-    std::string mangledName = getVectorMangledName(vecTy.getElementType(), numElements);
+
+    std::string mangledName = getVectorMangledName( vecTy.getElementType(), numElements);
     std::string intrinsicName = "llvm.riscv.vfadd." + mangledName + "." + mangledName + ".i32";
 
     SmallVector<Type, 4> argTypes = {adaptor.passthru().getType(), adaptor.lhs().getType(), adaptor.rhs().getType(), adaptor.vl().getType()};
+    
     ensureIntrinsicDeclared(rewriter, module, intrinsicName, llvmResultType, argTypes);
 
     rewriter.replaceOpWithNewOp<LLVM::CallOp>( op, TypeRange{llvmResultType}, SymbolRefAttr::get(rewriter.getContext(), intrinsicName),
         ValueRange{adaptor.passthru(), adaptor.lhs(), adaptor.rhs(), adaptor.vl()});
-        
+
     return success();
-  }   
+  }
 };
 
 struct SpatzVAddVVLowering : public ConvertOpToLLVMPattern<spatz::VAddVVOp> {
@@ -440,6 +450,41 @@ struct SpatzVFCvtRtzXUFVLowering : public ConvertOpToLLVMPattern<spatz::VFCvtRtz
   }
 };
 
+struct SpatzVFCvtRtzXFVLowering : public ConvertOpToLLVMPattern<spatz::VFCvtRtzXFVOp> {
+  using ConvertOpToLLVMPattern<spatz::VFCvtRtzXFVOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult matchAndRewrite(spatz::VFCvtRtzXFVOp op,OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Type llvmResultType = typeConverter->convertType(op.getResult().getType());
+    ModuleOp module = op->getParentOfType<ModuleOp>();
+    
+    if (!module) return failure();
+
+    auto outVecTy = op.getResult().getType().cast<VectorType>();
+
+    auto inVecTy = op.src().getType().cast<VectorType>();
+
+    unsigned numElements = outVecTy.getShape()[0];
+
+    std::string outMangled = getVectorMangledName(outVecTy.getElementType(), numElements);
+    std::string inMangled = getVectorMangledName(inVecTy.getElementType(), numElements);
+
+    std::string intrinsicName = "llvm.riscv.vfcvt.rtz.x.f.v." + outMangled + "." + inMangled + ".i32";
+
+    SmallVector<Type, 3> argTypes = {adaptor.passthru().getType(), adaptor.src().getType(), adaptor.vl().getType()};
+
+    ensureIntrinsicDeclared(rewriter, module, intrinsicName, llvmResultType, argTypes);
+
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(
+        op,
+        TypeRange{llvmResultType},
+        SymbolRefAttr::get(rewriter.getContext(), intrinsicName),
+        ValueRange{adaptor.passthru(), adaptor.src(), adaptor.vl()});
+    
+    return success();
+  }
+};
+
 struct SpatzVBitcastLowering : public ConvertOpToLLVMPattern<spatz::VBitcastOp> {
   using ConvertOpToLLVMPattern<spatz::VBitcastOp>::ConvertOpToLLVMPattern;
 
@@ -600,7 +645,8 @@ void populateSpatzToLLVMConversionPatterns(LLVMTypeConverter &converter, Rewrite
     SpatzVFMulVVLowering,
     SpatzVFDivVVLowering,
     SpatzVFMaccVFLowering,        
-    SpatzVFCvtRtzXUFVLowering,    
+    SpatzVFCvtRtzXUFVLowering,
+    SpatzVFCvtRtzXFVLowering,    
     SpatzVBitcastLowering,
     SpatzVFSubVFLowering,
     SpatzVFredUSumOpLowering,
