@@ -7,7 +7,7 @@ mkdir build
 
 cd build
 
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_TARGETS_TO_BUILD="RISCV" -DLLVM_OPTIMIZED_TABLEGEN=ON ../llvm
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="clang;lld;mlir" -DLLVM_TARGETS_TO_BUILD="RISCV" -DLLVM_OPTIMIZED_TABLEGEN=ON ../llvm
 
 ninja
 ```
@@ -43,10 +43,10 @@ To generate the object file: `clang --target=riscv32 -Xclang -target-feature -Xc
 ## Quadrilatero-Spatz MLIR pipeline
 
 ```
-mlir-opt mat_mul.mlir -canonicalize -lower-linalg-matmul-to-quadrilatero -lower-spatz-op -convert-linalg-to-loops -convert-scf-to-cf -convert-spatz-to-llvm -convert-func-to-llvm -convert-snitch-memory-to-llvm -convert-quadrilatero-to-llvm -convert-math-to-llvm -convert-arith-to-llvm -convert-memref-to-llvm -convert-cf-to-llvm -reconcile-unrealized-casts > MatMul.mlir
+mlir-opt mat_mul.mlir -canonicalize -linalg-fold-constant-transpose -tensor-bufferize -linalg-bufferize -func-bufferize -arith-bufferize -finalizing-bufferize -canonicalize -lower-linalg-matmul-to-quadrilatero -lower-spatz-op -canonicalize -convert-linalg-to-loops -convert-scf-to-cf -convert-math-to-libm -convert-spatz-to-llvm -lower-arith-to-snitch -convert-func-to-llvm -convert-snitch-memory-to-llvm -convert-quadrilatero-to-llvm -convert-math-to-llvm -convert-arith-to-llvm -convert-memref-to-llvm -convert-cf-to-llvm -reconcile-unrealized-casts > MatMul.mlir
 
 mlir-translate --mlir-to-llvmir MatMul.mlir -o MatMul.ll
 
-llc -march=riscv32 -mattr=+m,+f,+v,+xdma,+experimental-xtheadmatrix -riscv-v-vector-bits-min=2048 MatMul.ll -o MatMul.s
+llc -march=riscv32 -mattr=+m,+f,+zve32f,+xdma,+experimental-xtheadmatrix -riscv-v-vector-bits-min=512 --target-abi=ilp32f -o MatMul.s
 ```
 
