@@ -47,7 +47,7 @@ class RVMArithBase<dag outs, dag ins, string opcodestr, string argstr>
 
 class RVMMACC<dag outs, dag ins, string opcodestr, string argstr>
     : RVMArithBase<outs, ins, opcodestr, argstr> {
-  
+
   bits<4> ms2;
   bits<4> ms1;
   bits<2> md ;
@@ -148,7 +148,7 @@ class RVMCfgBase<dag outs, dag ins, string opcodestr, string argstr>
   let Inst{6-0} = OPC_CUSTOM_0.Value;
 }
 
-class RVMCfgK<dag outs, dag ins, string opcodestr, string argstr> 
+class RVMCfgK<dag outs, dag ins, string opcodestr, string argstr>
   : RVMCfgBase<outs, ins, opcodestr, argstr> {
     bits<5> rs1;
     bits<5> rd;
@@ -160,7 +160,7 @@ class RVMCfgK<dag outs, dag ins, string opcodestr, string argstr>
     let Inst{12}    = 0b0;
     let Inst{11-7}  = rd;
 }
-class RVMCfgM<dag outs, dag ins, string opcodestr, string argstr> 
+class RVMCfgM<dag outs, dag ins, string opcodestr, string argstr>
   : RVMCfgBase<outs, ins, opcodestr, argstr> {
     bits<5> rs1;
     bits<5> rd;
@@ -173,7 +173,7 @@ class RVMCfgM<dag outs, dag ins, string opcodestr, string argstr>
     let Inst{12}    = 0b0;
     let Inst{11-7}  = rd;
 }
-class RVMCfgN<dag outs, dag ins, string opcodestr, string argstr> 
+class RVMCfgN<dag outs, dag ins, string opcodestr, string argstr>
   : RVMCfgBase<outs, ins, opcodestr, argstr> {
     bits<5> rs1;
     bits<5> rd;
@@ -186,7 +186,7 @@ class RVMCfgN<dag outs, dag ins, string opcodestr, string argstr>
     let Inst{12}    = 0b0;
     let Inst{11-7}  = rd;
 }
-class RVMCfgDT<dag outs, dag ins, string opcodestr, string argstr> 
+class RVMCfgDT<dag outs, dag ins, string opcodestr, string argstr>
   : RVMCfgBase<outs, ins, opcodestr, argstr> {
     bits<5> Aimm5;
     bits<5> Bimm5;
@@ -202,7 +202,7 @@ class RVMCfgDT<dag outs, dag ins, string opcodestr, string argstr>
 let Predicates = [HasVendorXTHeadMatrix], DecoderNamespace = "XTHeadMatrix",hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
 
   let mayLoad = 1 in {
-    def MLD_LHS : RVMLoadStore<0b000, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.lhs", "$mds3, (${rs1}), $rs2">;
+    def MLD_LHS : RVMLoadStore<0b100, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.lhs", "$mds3, (${rs1}), $rs2">;
     def MLD_RHS : RVMLoadStore<0b001, (outs MR:$mds3), (ins GPR:$rs1, GPR:$rs2), "mld.rhs", "$mds3, (${rs1}), $rs2">;
   }
 
@@ -213,7 +213,6 @@ let Predicates = [HasVendorXTHeadMatrix], DecoderNamespace = "XTHeadMatrix",hasS
   def MMACC   : RVMMACC <(outs ACC:$md), (ins MR:$ms1, MR:$ms2), "mmacc", "$md, $ms2, $ms1">;
   def MZERO_M : RVMZeroM<(outs MR:$md) , (ins)                 , "mzero.m", "$md">;
   def MZERO_A : RVMZeroA<(outs ACC:$md), (ins)                 , "mzero.a", "$md">;
-  
   def MMOV_MM  : RVMMoveMM<(outs MR:$md) , (ins MR:$ms1) , "mmov.mm" , "$md, $ms1">;
   def MMOV_MA  : RVMMoveMA<(outs ACC:$md), (ins MR:$ms1) , "mmov.ma" , "$md, $ms1">;
   def MMOV_AM  : RVMMoveAM<(outs MR:$md) , (ins ACC:$ms1), "mmov.am" , "$md, $ms1">;
@@ -231,11 +230,9 @@ let Predicates = [HasVendorXTHeadMatrix], DecoderNamespace = "XTHeadMatrix",hasS
 let Predicates = [HasVendorXTHeadMatrix] in {
   def : Pat<(int_riscv_quadrilatero_mld_lhs GPR:$rs1, GPR:$rs2), (MLD_LHS GPR:$rs1, GPR:$rs2)>;
   def : Pat<(int_riscv_quadrilatero_mld_rhs GPR:$rs1, GPR:$rs2), (MLD_RHS GPR:$rs1, GPR:$rs2)>;
-  
   def : Pat<(int_riscv_quadrilatero_mst MR:$mds3, GPR:$rs1, GPR:$rs2), (MST MR:$mds3, GPR:$rs1, GPR:$rs2)>;
 
   def : Pat<(int_riscv_quadrilatero_mmacc MR:$ms1, MR:$ms2), (MMACC MR:$ms1, MR:$ms2)>;
-  
   def : Pat<(int_riscv_quadrilatero_mzero_m), (MZERO_M)>;
   def : Pat<(int_riscv_quadrilatero_mzero_a), (MZERO_A)>;
 
