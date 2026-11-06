@@ -188,14 +188,14 @@ class RVMCfgN<dag outs, dag ins, string opcodestr, string argstr>
 }
 class RVMCfgDT<dag outs, dag ins, string opcodestr, string argstr>
   : RVMCfgBase<outs, ins, opcodestr, argstr> {
-    bits<5> Aimm5;
-    bits<5> Bimm5;
-    bits<5> Cimm5;
+    bits<5> immA;
+    bits<5> immB;
+    bits<5> immC;
 
     let Inst{28-26} = 0b011;
-    let Inst{24-20} = Cimm5{4-0};
-    let Inst{19-15} = Aimm5{4-0};
-    let Inst{14-10} = Bimm5{4-0};
+    let Inst{24-20} = immC;
+    let Inst{19-15} = immA;
+    let Inst{14-10} = immB;
     let Inst{9-7}   = 0b000;
 }
 
