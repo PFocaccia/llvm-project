@@ -1,12 +1,9 @@
-//===- LowerSpatzMatrixAdd.cpp -------------------------------------------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-
 #include "PassDetail.h"
+#include "mlir/Analysis/DataLayoutAnalysis.h"
+#include "mlir/Conversion/LLVMCommon/LoweringOptions.h"
+#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
+#include "mlir/IR/Matchers.h"
+#include <string>
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
@@ -426,12 +423,119 @@ struct LayerNormLowering : public OpRewritePattern<spatz::LayerNormOp> {
   }
 };
 
+static LogicalResult lowerF32MatrixAdd(spatz::MatrixAddOp op,
+                                      PatternRewriter &b) {
+  auto at = op.accMatrix().getType().cast<MemRefType>();
+  auto pt = op.tmpMatrix().getType().cast<MemRefType>();
+  SmallVector<int64_t> as, ps;
+  int64_t ao, po;
+  if (at.getRank() != 2 || pt.getRank() != 2 ||
+      !at.getElementType().isF32() || !pt.getElementType().isF32() ||
+      failed(getStridesAndOffset(at, as, ao)) ||
+      failed(getStridesAndOffset(pt, ps, po)) || as[1] != 1 || ps[1] != 1)
+    return failure();
+  auto module = op->getParentOfType<ModuleOp>();
+  if (!module) return failure();
+  Location loc = op.getLoc();
+  DataLayoutAnalysis analysis(module);
+  LowerToLLVMOptions options(b.getContext(),
+                             analysis.getAtOrAbove(module.getOperation()));
+  LLVMTypeConverter converter(b.getContext(), options, &analysis);
+  auto i32 = b.getI32Type();
+  auto c32 = [&](int64_t n) -> Value {
+    return b.create<LLVM::ConstantOp>(loc, i32, b.getI32IntegerAttr(n));
+  };
+  auto narrow = [&](Value v) -> Value {
+    unsigned bits = v.getType().cast<IntegerType>().getWidth();
+    if (bits > 32) return b.create<LLVM::TruncOp>(loc, i32, v);
+    if (bits < 32) return b.create<LLVM::ZExtOp>(loc, i32, v);
+    return v;
+  };
+  auto descriptor = [&](Value ref) -> Value {
+    Type ty = converter.convertType(ref.getType());
+    return b.create<UnrealizedConversionCastOp>(
+        loc, TypeRange{ty}, ValueRange{ref}).getResult(0);
+  };
+  auto field = [&](Value desc, ArrayRef<int64_t> pos) -> Value {
+    auto fields = desc.getType().cast<LLVM::LLVMStructType>().getBody();
+    Type ty = fields[pos[0]];
+    if (pos.size() == 2) ty = ty.cast<LLVM::LLVMArrayType>().getElementType();
+    return b.create<LLVM::ExtractValueOp>(loc, ty, desc, b.getI64ArrayAttr(pos));
+  };
+  auto address = [&](Value desc) -> Value {
+    Value ptr = field(desc, {1});
+    Value offset = narrow(field(desc, {2}));
+    Value bytes = b.create<LLVM::MulOp>(loc, offset, c32(4));
+    Value base = b.create<LLVM::PtrToIntOp>(loc, i32, ptr);
+    return b.create<LLVM::AddOp>(loc, base, bytes);
+  };
+  Value ad = descriptor(op.accMatrix()), pd = descriptor(op.tmpMatrix());
+  Value ap = address(ad), pp = address(pd);
+  auto pitch = [&](Value desc, int64_t stride) -> Value {
+    if (!ShapedType::isDynamicStrideOrOffset(stride)) return c32(stride * 4);
+    return b.create<LLVM::MulOp>(loc, narrow(field(desc, {4, 0})), c32(4));
+  };
+  Value ab = pitch(ad, as[0]), pb = pitch(pd, ps[0]);
+  APInt rowConstant, colConstant;
+  bool staticRows = matchPattern(op.rows(), m_ConstantInt(&rowConstant));
+  bool staticCols = matchPattern(op.cols(), m_ConstantInt(&colConstant));
+
+  bool flat = staticRows && staticCols && rowConstant.isNonNegative() &&
+      colConstant.isNonNegative() && rowConstant.getLimitedValue() <= 65535 &&
+      colConstant.getLimitedValue() <= 65535 &&
+      as[0] == colConstant.getSExtValue() && ps[0] == as[0];
+  Value rows = b.create<arith::IndexCastOp>(loc, i32, op.rows());
+  Value cols = b.create<arith::IndexCastOp>(loc, i32, op.cols());
+  if (flat) {
+    rows = c32(1);
+    cols = c32(rowConstant.getSExtValue() * colConstant.getSExtValue());
+  }
+  std::string code =
+      "mv t0, $0\n\tmv t1, $1\n\tmv t2, $2\n\t"
+      "csrr zero, fcsr\n\tbeqz t2, 9f\n\tbeqz $3, 9f\n\t"
+
+      "vsetvli t4, $3, e32, m2, ta, ma\n\tbne t4, $3, 4f\n\t"
+      "1:\n\tvle32.v v8, (t0)\n\tcsrr zero, fcsr\n\t"
+      "vle32.v v10, (t1)\n\tcsrr zero, fcsr\n\t"
+      "vfadd.vv v8, v8, v10\n\tvse32.v v8, (t0)\n\tcsrr zero, fcsr\n\t"
+      "add t0, t0, $4\n\tadd t1, t1, $5\n\t"
+      "addi t2, t2, -1\n\tbnez t2, 1b\n\tj 9f\n\t"
+
+      "4:\n\tmv t3, $3\n\t"
+      "5:\n\tvsetvli t4, t3, e32, m2, ta, ma\n\t"
+      "vle32.v v8, (t0)\n\tcsrr zero, fcsr\n\t"
+      "vle32.v v10, (t1)\n\tcsrr zero, fcsr\n\t"
+      "vfadd.vv v8, v8, v10\n\tvse32.v v8, (t0)\n\tcsrr zero, fcsr\n\t"
+      "slli t5, t4, 2\n\tadd t0, t0, t5\n\tadd t1, t1, t5\n\t"
+      "sub t3, t3, t4\n\tbnez t3, 5b\n\t"
+      "slli t5, $3, 2\n\tsub t3, $4, t5\n\tadd t0, t0, t3\n\t"
+      "sub t3, $5, t5\n\tadd t1, t1, t3\n\t"
+      "addi t2, t2, -1\n\tbnez t2, 4b\n\t"
+      "9:\n\tcsrr zero, fcsr\n\t";
+  std::string constraints = "r,r,r,r,r,r,~{t0},~{t1},~{t2},~{t3},~{t4},~{t5},";
+  for (int reg = 8; reg < 24; ++reg)
+    constraints += "~{v" + std::to_string(reg) + "},";
+  constraints += "~{vl},~{vtype},~{memory}";
+  OperationState state(loc, LLVM::InlineAsmOp::getOperationName());
+  state.addOperands(SmallVector<Value, 6>{ap, pp, rows, cols, ab, pb});
+  state.addAttribute("asm_string", b.getStringAttr(code));
+  state.addAttribute("constraints", b.getStringAttr(constraints));
+  state.addAttribute("has_side_effects", b.getUnitAttr());
+  b.create(state);
+  b.eraseOp(op);
+  return success();
+}
+
 struct MatrixAddLowering : public OpRewritePattern<spatz::MatrixAddOp> {
   using OpRewritePattern<spatz::MatrixAddOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(spatz::MatrixAddOp op, PatternRewriter &rewriter) const override {
     auto accType = op.accMatrix().getType().dyn_cast<MemRefType>();
     if (!accType) return failure();
+    auto dt = op->getAttrOfType<IntegerAttr>("dataType");
+    if (accType.getElementType().isF32() && dt && dt.getInt() == 6 &&
+        succeeded(lowerF32MatrixAdd(op, rewriter)))
+      return success();
 
     auto elemType = accType.getElementType();
     Type computeElemType = elemType;
@@ -448,40 +552,80 @@ struct MatrixAddLowering : public OpRewritePattern<spatz::MatrixAddOp> {
 
     auto vecLenAttr = op->getAttrOfType<IntegerAttr>("vecLen");
     if (!vecLenAttr || vecLenAttr.getInt() <= 0) return failure();
-    
+
     int64_t baseElements = 8;
     auto memVectorType = VectorType::get({baseElements}, elemType, {true});
     auto computeVectorType = VectorType::get({baseElements}, computeElemType, {true});
 
     Location loc = op.getLoc();
-    Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
-    Value c1 = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+
     Type i32Type = rewriter.getI32Type();
+    Value zeroIndex = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+    Value zeroI32 = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+    Value oneI32 = rewriter.create<arith::ConstantIntOp>(loc, 1, 32);
+    Value rowsI32 = rewriter.create<arith::IndexCastOp>(loc, i32Type, op.rows());
     Value vlI32 = rewriter.create<arith::IndexCastOp>(loc, i32Type, op.cols());
 
-    rewriter.create<scf::ForOp>(loc, c0, op.rows(), c1, ValueRange{}, [&](OpBuilder &builder, Location bodyLoc, Value rowIdx, ValueRange) {
-          Value indices[] = {rowIdx, c0};
-          Value accVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.accMatrix(), indices, vlI32);
-          Value tmpVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.tmpMatrix(), indices, vlI32);
-          
-          Value accComputeVec = accVec;
-          Value tmpComputeVec = tmpVec;
-          if (memVectorType != computeVectorType) {
-            accComputeVec = builder.create<arith::BitcastOp>(bodyLoc, computeVectorType, accVec);
-            tmpComputeVec = builder.create<arith::BitcastOp>(bodyLoc, computeVectorType, tmpVec);
-          }
+    auto loop = rewriter.create<scf::WhileOp>(
+        loc, TypeRange{i32Type}, ValueRange{zeroI32});
 
-          Value undefVec = builder.create<LLVM::UndefOp>(bodyLoc, computeVectorType);
-          Value sumComputeVec;
-          if (isFloat) sumComputeVec = builder.create<spatz::VFAddVVOp>(bodyLoc, computeVectorType, undefVec, accComputeVec, tmpComputeVec, vlI32);
-          else sumComputeVec = builder.create<spatz::VAddVVOp>(bodyLoc, computeVectorType, undefVec, accComputeVec, tmpComputeVec, vlI32);
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      Block *before = rewriter.createBlock(
+          &loop.getBefore(), loop.getBefore().end(), TypeRange{i32Type},
+          SmallVector<Location>{loc});
+      rewriter.setInsertionPointToEnd(before);
+      Value rowI32 = before->getArgument(0);
+      Value keepGoing = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::ult, rowI32, rowsI32);
+      rewriter.create<scf::ConditionOp>(
+          loc, keepGoing, ValueRange{rowI32});
 
-          Value sumMemVec = sumComputeVec;
-          if (memVectorType != computeVectorType) sumMemVec = builder.create<arith::BitcastOp>(bodyLoc, memVectorType, sumComputeVec);
+      Block *after = rewriter.createBlock(
+          &loop.getAfter(), loop.getAfter().end(), TypeRange{i32Type},
+          SmallVector<Location>{loc});
+      rewriter.setInsertionPointToEnd(after);
+      rowI32 = after->getArgument(0);
+      Value rowIndex = rewriter.create<arith::IndexCastOp>(
+          loc, rewriter.getIndexType(), rowI32);
+      Value indices[] = {rowIndex, zeroIndex};
 
-          builder.create<spatz::VSEOp>(bodyLoc, sumMemVec, op.accMatrix(), indices, vlI32);
-          builder.create<scf::YieldOp>(bodyLoc);
-        });
+      Value accVec = rewriter.create<spatz::VLEOp>(
+          loc, memVectorType, op.accMatrix(), indices, vlI32);
+      Value tmpVec = rewriter.create<spatz::VLEOp>(
+          loc, memVectorType, op.tmpMatrix(), indices, vlI32);
+
+      Value accComputeVec = accVec;
+      Value tmpComputeVec = tmpVec;
+      if (memVectorType != computeVectorType) {
+        accComputeVec = rewriter.create<arith::BitcastOp>(
+            loc, computeVectorType, accVec);
+        tmpComputeVec = rewriter.create<arith::BitcastOp>(
+            loc, computeVectorType, tmpVec);
+      }
+
+      Value undefVec = rewriter.create<LLVM::UndefOp>(loc, computeVectorType);
+      Value sumComputeVec;
+      if (isFloat)
+        sumComputeVec = rewriter.create<spatz::VFAddVVOp>(
+            loc, computeVectorType, undefVec, accComputeVec, tmpComputeVec,
+            vlI32);
+      else
+        sumComputeVec = rewriter.create<spatz::VAddVVOp>(
+            loc, computeVectorType, undefVec, accComputeVec, tmpComputeVec,
+            vlI32);
+
+      Value sumMemVec = sumComputeVec;
+      if (memVectorType != computeVectorType)
+        sumMemVec = rewriter.create<arith::BitcastOp>(
+            loc, memVectorType, sumComputeVec);
+      rewriter.create<spatz::VSEOp>(
+          loc, sumMemVec, op.accMatrix(), indices, vlI32);
+
+      Value nextRow = rewriter.create<arith::AddIOp>(
+          loc, rowI32, oneI32);
+      rewriter.create<scf::YieldOp>(loc, ValueRange{nextRow});
+    }
 
     rewriter.eraseOp(op);
     return success();
@@ -510,7 +654,7 @@ struct MatrixVectorAddLowering : public OpRewritePattern<spatz::MatrixVectorAddO
 
     auto vecLenAttr = op->getAttrOfType<IntegerAttr>("vecLen");
     if (!vecLenAttr || vecLenAttr.getInt() <= 0) return failure();
-    
+
     int64_t baseElements = 8;
     auto memVectorType = VectorType::get({baseElements}, elemType, {true});
     auto computeVectorType = VectorType::get({baseElements}, computeElemType, {true});
@@ -524,10 +668,10 @@ struct MatrixVectorAddLowering : public OpRewritePattern<spatz::MatrixVectorAddO
     rewriter.create<scf::ForOp>(loc, c0, op.rows(), c1, ValueRange{}, [&](OpBuilder &builder, Location bodyLoc, Value rowIdx, ValueRange) {
           Value matIndices[] = {rowIdx, c0};
           Value vecIndices[] = {c0};
-          
+
           Value accVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.accMatrix(), matIndices, vlI32);
           Value addVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.addVector(), vecIndices, vlI32);
-          
+
           Value accComputeVec = accVec;
           Value addComputeVec = addVec;
           if (memVectorType != computeVectorType) {
@@ -574,7 +718,7 @@ struct MatrixScalarMulLowering : public OpRewritePattern<spatz::MatrixScalarMulO
 
     auto vecLenAttr = op->getAttrOfType<IntegerAttr>("vecLen");
     if (!vecLenAttr || vecLenAttr.getInt() <= 0) return failure();
-    
+
     int64_t baseElements = 8;
     auto memVectorType = VectorType::get({baseElements}, elemType, {true});
     auto computeVectorType = VectorType::get({baseElements}, computeElemType, {true});
@@ -587,9 +731,9 @@ struct MatrixScalarMulLowering : public OpRewritePattern<spatz::MatrixScalarMulO
 
     rewriter.create<scf::ForOp>(loc, c0, op.rows(), c1, ValueRange{}, [&](OpBuilder &builder, Location bodyLoc, Value rowIdx, ValueRange) {
           Value matIndices[] = {rowIdx, c0};
-          
+
           Value accVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.accMatrix(), matIndices, vlI32);
-          
+
           Value accComputeVec = accVec;
           if (memVectorType != computeVectorType) {
             accComputeVec = builder.create<arith::BitcastOp>(bodyLoc, computeVectorType, accVec);
@@ -634,7 +778,7 @@ struct MatrixSubLowering : public OpRewritePattern<spatz::MatrixSubOp> {
 
     auto vecLenAttr = op->getAttrOfType<IntegerAttr>("vecLen");
     if (!vecLenAttr || vecLenAttr.getInt() <= 0) return failure();
-    
+
     int64_t baseElements = 8;
     auto memVectorType = VectorType::get({baseElements}, elemType, {true});
     auto computeVectorType = VectorType::get({baseElements}, computeElemType, {true});
@@ -649,7 +793,7 @@ struct MatrixSubLowering : public OpRewritePattern<spatz::MatrixSubOp> {
           Value indices[] = {rowIdx, c0};
           Value accVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.accMatrix(), indices, vlI32);
           Value tmpVec = builder.create<spatz::VLEOp>(bodyLoc, memVectorType, op.tmpMatrix(), indices, vlI32);
-          
+
           Value accComputeVec = accVec;
           Value tmpComputeVec = tmpVec;
           if (memVectorType != computeVectorType) {
@@ -659,7 +803,7 @@ struct MatrixSubLowering : public OpRewritePattern<spatz::MatrixSubOp> {
 
           Value undefVec = builder.create<LLVM::UndefOp>(bodyLoc, computeVectorType);
           Value subComputeVec;
-          
+
           if (isFloat) subComputeVec = builder.create<spatz::VFSubVVOp>(bodyLoc, computeVectorType, undefVec, accComputeVec, tmpComputeVec, vlI32);
           else return;
 
@@ -691,22 +835,30 @@ struct MatrixExpReduceLowering : public OpRewritePattern<spatz::MatrixExpReduceO
     Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
     Value c1 = rewriter.create<arith::ConstantIndexOp>(loc, 1);
     Type i32Type = rewriter.getI32Type();
-    
+
     Value vlI32 = rewriter.create<arith::IndexCastOp>(loc, i32Type, op.mE());
     Value zeroIdx[] = {c0};
 
     auto singleElemMemType = MemRefType::get({1}, elemType);
-    Value memB = rewriter.create<memref::AllocaOp>(loc, singleElemMemType);
-    Value memC = rewriter.create<memref::AllocaOp>(loc, singleElemMemType);
-    
+
+    auto parentFn = op->getParentOfType<func::FuncOp>();
+    if (!parentFn || parentFn.isExternal()) return failure();
+    Value memB, memC;
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(&parentFn.getBody().front());
+      memB = rewriter.create<memref::AllocaOp>(loc, singleElemMemType);
+      memC = rewriter.create<memref::AllocaOp>(loc, singleElemMemType);
+    }
+
     Value constB = rewriter.create<arith::ConstantOp>(loc, rewriter.getFloatAttr(elemType, 1064866805.0f));
     Value constC = rewriter.create<arith::ConstantOp>(loc, rewriter.getFloatAttr(elemType, 12102203.0f));
-    
+
     rewriter.create<memref::StoreOp>(loc, constB, memB, zeroIdx);
     rewriter.create<memref::StoreOp>(loc, constC, memC, zeroIdx);
 
     Value zeroFloat = rewriter.create<arith::ConstantOp>(loc, rewriter.getFloatAttr(elemType, 0.0f));
-    rewriter.create<scf::ForOp>(loc, c0, op.mE(), c1, ValueRange{}, 
+    rewriter.create<scf::ForOp>(loc, c0, op.mE(), c1, ValueRange{},
         [&](OpBuilder &builder, Location bodyLoc, Value colIdx, ValueRange loopArgs) {
           Value storeIndices[] = {colIdx};
           builder.create<memref::StoreOp>(bodyLoc, zeroFloat, op.sum_arr(), storeIndices);
@@ -717,7 +869,7 @@ struct MatrixExpReduceLowering : public OpRewritePattern<spatz::MatrixExpReduceO
     Value mNewVec = rewriter.create<spatz::VLEOp>(loc, vecType, op.m_val(), zeroIdx, vlI32);
 
     auto forOp = rewriter.create<scf::ForOp>(loc, c0, op.nE(), c1, ValueRange{initialSumVec}, [&](OpBuilder &builder, Location bodyLoc, Value rIdx, ValueRange loopArgs) {
-          
+
           Value currentSumVec = loopArgs[0];
 
           Value scalarB = builder.create<memref::LoadOp>(bodyLoc, memB, zeroIdx);
@@ -763,7 +915,7 @@ struct MatrixColumnMaxLowering : public OpRewritePattern<spatz::MatrixColumnMaxO
     if (!matrixType || !matrixType.getElementType().isa<FloatType>()) return failure();
 
     auto elemType = matrixType.getElementType();
-    
+
     int64_t baseElements = 8;
     auto computeVectorType = VectorType::get({baseElements}, elemType, {true});
 
@@ -776,7 +928,7 @@ struct MatrixColumnMaxLowering : public OpRewritePattern<spatz::MatrixColumnMaxO
     Value negInf = rewriter.create<arith::ConstantFloatOp>(
         loc, APFloat::getLargest(elemType.cast<FloatType>().getFloatSemantics(), true), elemType.cast<FloatType>());
 
-    rewriter.create<scf::ForOp>(loc, c0, op.cols(), c1, ValueRange{}, 
+    rewriter.create<scf::ForOp>(loc, c0, op.cols(), c1, ValueRange{},
         [&](OpBuilder &builder, Location bodyLoc, Value colIdx, ValueRange loopArgs) {
           Value storeIndices[] = {colIdx};
           builder.create<memref::StoreOp>(bodyLoc, negInf, op.maxVector(), storeIndices);
@@ -784,12 +936,12 @@ struct MatrixColumnMaxLowering : public OpRewritePattern<spatz::MatrixColumnMaxO
         });
 
     Value zeroIndex[] = {c0};
-    
+
     Value initialMaxVec = rewriter.create<spatz::VLEOp>(loc, computeVectorType, op.maxVector(), zeroIndex, vlI32);
 
-    auto forOp = rewriter.create<scf::ForOp>(loc, c0, op.rows(), c1, ValueRange{initialMaxVec}, 
+    auto forOp = rewriter.create<scf::ForOp>(loc, c0, op.rows(), c1, ValueRange{initialMaxVec},
         [&](OpBuilder &builder, Location bodyLoc, Value rowIdx, ValueRange loopArgs) {
-          
+
           Value currentMaxVec = loopArgs[0];
           Value matrixIndices[] = {rowIdx, c0};
           Value rowVec = builder.create<spatz::VLEOp>(bodyLoc, computeVectorType, op.matrix(), matrixIndices, vlI32);
@@ -822,9 +974,9 @@ struct VectorMaxUpdateLowering : public OpRewritePattern<spatz::VectorMaxUpdateO
     Value step = rewriter.create<arith::ConstantIndexOp>(loc, baseElements);
     Value len = op.len();
 
-    rewriter.create<scf::ForOp>(loc, c0, len, step, ValueRange{}, 
+    rewriter.create<scf::ForOp>(loc, c0, len, step, ValueRange{},
       [&](OpBuilder &builder, Location bodyLoc, Value idx, ValueRange) {
-        
+
         Value rem = builder.create<arith::SubIOp>(bodyLoc, len, idx);
         Value cond = builder.create<arith::CmpIOp>(bodyLoc, arith::CmpIPredicate::slt, rem, step);
         Value vlIndex = builder.create<arith::SelectOp>(bodyLoc, cond, rem, step);
@@ -833,11 +985,11 @@ struct VectorMaxUpdateLowering : public OpRewritePattern<spatz::VectorMaxUpdateO
         Value indices[] = {idx};
         Value vPrev = builder.create<spatz::VLEOp>(bodyLoc, vecType, op.vec_prev(), indices, vl);
         Value vNew = builder.create<spatz::VLEOp>(bodyLoc, vecType, op.vec_new(), indices, vl);
-        
+
         Value undef = builder.create<LLVM::UndefOp>(bodyLoc, vecType);
-        
+
         Value vMax = builder.create<spatz::VFMaxVVOp>(bodyLoc, vecType, undef, vPrev, vNew, vl);
-        
+
         Value vDiff = builder.create<spatz::VFSubVVOp>(bodyLoc, vecType, undef, vPrev, vMax, vl);
 
         builder.create<spatz::VSEOp>(bodyLoc, vMax, op.vec_prev(), indices, vl);
@@ -854,7 +1006,7 @@ struct VectorExpLowering : public OpRewritePattern<spatz::VectorExpOp> {
   using OpRewritePattern<spatz::VectorExpOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(spatz::VectorExpOp op, PatternRewriter &rewriter) const override {
-    
+
     auto inputType = op.vec_in().getType().dyn_cast<MemRefType>();
     auto outputType = op.vec_out().getType().dyn_cast<MemRefType>();
 
@@ -869,12 +1021,12 @@ struct VectorExpLowering : public OpRewritePattern<spatz::VectorExpOp> {
     FloatType f32Type = rewriter.getF32Type();
     IntegerType i32Type = rewriter.getI32Type();
 
-    constexpr int64_t scalableElements = 2;
-    constexpr int64_t elementsPerIteration = 16;
+    constexpr int64_t scalableElements = 8;
+    constexpr int64_t elementsPerIteration = 8;
 
     auto floatVecType = VectorType::get({scalableElements}, f32Type, {true});
     auto integerVecType = VectorType::get({scalableElements}, i32Type, {true});
-    
+
     Value begin = rewriter.create<arith::ConstantIndexOp>(loc, 0);
     Value step = rewriter.create<arith::ConstantIndexOp>(loc, elementsPerIteration);
     Value fullVL = rewriter.create<arith::ConstantIntOp>(loc, elementsPerIteration, 32);
@@ -888,7 +1040,7 @@ struct VectorExpLowering : public OpRewritePattern<spatz::VectorExpOp> {
 
     rewriter.create<scf::ForOp>( loc,begin,len,step,ValueRange{},
         [&](OpBuilder &builder,Location bodyLoc,Value idx,ValueRange) {
-          
+
             Value remaining = builder.create<arith::SubIOp>(bodyLoc, len, idx);
             Value hasTail = builder.create<arith::CmpIOp>(bodyLoc, arith::CmpIPredicate::slt, remaining, step);
             Value remainingI32 = builder.create<arith::IndexCastOp>(bodyLoc, i32Type, remaining);
@@ -948,9 +1100,9 @@ struct VectorElementwiseLowering : public OpRewritePattern<OpTy> {
     Value step = rewriter.create<arith::ConstantIndexOp>(loc, baseElements);
     Value len = op.len();
 
-    rewriter.create<scf::ForOp>(loc, c0, len, step, ValueRange{}, 
+    rewriter.create<scf::ForOp>(loc, c0, len, step, ValueRange{},
       [&](OpBuilder &builder, Location bodyLoc, Value idx, ValueRange) {
-        
+
         Value rem = builder.create<arith::SubIOp>(bodyLoc, len, idx);
         Value cond = builder.create<arith::CmpIOp>(bodyLoc, arith::CmpIPredicate::slt, rem, step);
         Value vlIndex = builder.create<arith::SelectOp>(bodyLoc, cond, rem, step);
@@ -960,7 +1112,7 @@ struct VectorElementwiseLowering : public OpRewritePattern<OpTy> {
         Value vA = builder.create<spatz::VLEOp>(bodyLoc, vecType, op.vec_a(), indices, vl);
         Value vB = builder.create<spatz::VLEOp>(bodyLoc, vecType, op.vec_b(), indices, vl);
         Value undef = builder.create<LLVM::UndefOp>(bodyLoc, vecType);
-        
+
         Value vRes;
         if constexpr (IsAdd) {
             vRes = builder.create<spatz::VFAddVVOp>(bodyLoc, vecType, undef, vA, vB, vl);
@@ -1066,25 +1218,289 @@ struct MatrixRowMathLowering : public OpRewritePattern<OpTy> {
 using MatrixRowScaleLowering = MatrixRowMathLowering<spatz::MatrixRowScaleOp, true>;
 using MatrixRowDivLowering = MatrixRowMathLowering<spatz::MatrixRowDivOp, false>;
 
+static Value getSpatzF32Address(OpBuilder &ib, Location loc, ModuleOp module, Value ref) {
+  DataLayoutAnalysis layoutAnalysis(module);
+  LowerToLLVMOptions options(ib.getContext(), layoutAnalysis.getAtOrAbove(module.getOperation()));
+  LLVMTypeConverter converter(ib.getContext(), options, &layoutAnalysis);
+  auto addr32 = [&](Value ref) -> Value {
+    Type descTy = converter.convertType(ref.getType());
+    auto fields = descTy.cast<LLVM::LLVMStructType>().getBody();
+    Value desc = ib.create<UnrealizedConversionCastOp>(loc, TypeRange{descTy}, ValueRange{ref}).getResult(0);
+    Value ptr = ib.create<LLVM::ExtractValueOp>(loc, fields[1], desc, ib.getI64ArrayAttr({1}));
+    Value off = ib.create<LLVM::ExtractValueOp>(loc, fields[2], desc, ib.getI64ArrayAttr({2}));
+    unsigned bits = off.getType().cast<IntegerType>().getWidth();
+    if (bits > 32) off = ib.create<LLVM::TruncOp>(loc, ib.getI32Type(), off);
+    else if (bits < 32) off = ib.create<LLVM::ZExtOp>(loc, ib.getI32Type(), off);
+    Value four = ib.create<LLVM::ConstantOp>(loc, ib.getI32Type(), ib.getI32IntegerAttr(4));
+    Value bytes = ib.create<LLVM::MulOp>(loc, off, four);
+    Value base = ib.create<LLVM::PtrToIntOp>(loc, ib.getI32Type(), ptr);
+    return ib.create<LLVM::AddOp>(loc, base, bytes);
+  };
+  return addr32(ref);
+}
+
+struct AttentionSoftmaxUpdateLowering : public OpRewritePattern<spatz::AttentionSoftmaxUpdateOp> {
+  using OpRewritePattern<spatz::AttentionSoftmaxUpdateOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(spatz::AttentionSoftmaxUpdateOp op, PatternRewriter &rewriter) const override {
+    OpBuilder &ib = rewriter;
+    Location loc = op.getLoc();
+    ModuleOp module = op->getParentOfType<ModuleOp>();
+    Value scorePtr = getSpatzF32Address(ib, loc, module, op.scores()), maxPtr = getSpatzF32Address(ib, loc, module, op.maxState());
+    Value alphaPtr = getSpatzF32Address(ib, loc, module, op.alpha()), denPtr = getSpatzF32Address(ib, loc, module, op.denom());
+    Value queries = ib.create<arith::IndexCastOp>(loc, ib.getI32Type(), op.rows());
+    Value keys = ib.create<arith::IndexCastOp>(loc, ib.getI32Type(), ib.create<arith::ConstantIndexOp>(loc, op.keyRows()));
+    bool fullKeys = op.keyRows() == 32;
+    std::string code;
+    if (fullKeys) {
+
+      code =
+          "mv t0, $0\n\tmv t1, $1\n\tmv t2, $2\n\tmv t3, $3\n\tmv t4, $4\n\t"
+          "beqz t4, 5f\n\tbeqz $5, 5f\n\t"
+          "li t6, 0x3e000000\n\tfmv.w.x ft0, t6\n\t"
+          "li t6, 0x4b38aa3b\n\tfmv.w.x ft1, t6\n\t"
+          "li t6, 0x4e7de250\n\tfmv.w.x ft2, t6\n\t"
+          "li t6, 0xc2ae0000\n\tfmv.w.x ft3, t6\n\t"
+          "fmv.w.x ft4, zero\n\tli t6, -8388609\n\tfmv.w.x ft5, t6\n\t"
+          "1:\n\tvsetvli t5, t4, e32, m2, ta, ma\n\t"
+          "li t6, -8388609\n\tfmv.w.x ft5, t6\n\tvfmv.v.f v24, ft5\n\tvfmv.v.f v28, ft5\n\tmv t6, t0\n\t";
+      for (int row = 0; row < 12; ++row) {
+        std::string v = "v" + std::to_string(2*row);
+        std::string mx = (row & 1) ? "v28" : "v24";
+        code += "vle32.v " + v + ", (t6)\n\tvfmax.vv " + mx + ", " + mx + ", " + v + "\n\taddi t6, t6, 256\n\t";
+
+        if ((row & 1) == 1) code += "csrr s1, fcsr\n\t";
+      }
+      code += "li s1, 5\n\t2:\n\t";
+      for (int row = 0; row < 4; ++row) {
+        std::string mx = (row & 1) ? "v28" : "v24";
+        code += "vle32.v v26, (t6)\n\tvfmax.vv " + mx + ", " + mx + ", v26\n\taddi t6, t6, 256\n\t";
+
+        if ((row & 1) == 1) code += "csrr zero, fcsr\n\t";
+      }
+      code += "addi s1, s1, -1\n\tbnez s1, 2b\n\tvfmax.vv v24, v24, v28\n\tvfmul.vf v24, v24, ft0\n\t";
+      if (!op.firstBlock())
+        code += "vle32.v v28, (t1)\n\tvfmax.vv v24, v28, v24\n\t"
+                "vfsub.vv v28, v28, v24\n\tvfmax.vf v28, v28, ft3\n\t"
+                "vfmin.vf v28, v28, ft4\n\tvfmul.vf v28, v28, ft1\n\t"
+                "vfadd.vf v28, v28, ft2\n\tvfcvt.rtz.xu.f.v v28, v28\n\t"
+                "vse32.v v28, (t2)\n\t";
+
+      code += "vse32.v v24, (t1)\n\tvmv.v.i v26, 0\n\t"
+              "fmul.s ft5, ft0, ft1\n\tvfmv.v.f v30, ft2\n\t"
+              "vfnmsac.vf v30, ft1, v24\n\tvmv.v.i v24, 0\n\tmv t6, t0\n\t";
+      auto expRow = [&](int reg, bool odd) -> std::string {
+        std::string v = "v" + std::to_string(reg);
+        std::string sum = odd ? "v24" : "v26";
+        return "vfmadd.vf " + v + ", ft5, v30\n\t"
+               "vfcvt.rtz.xu.f.v " + v + ", " + v + "\n\t"
+               "vse32.v " + v + ", (t6)\n\t"
+               "vfadd.vv " + sum + ", " + sum + ", " + v + "\n\taddi t6, t6, 256\n\t";
+      };
+
+      for (int row = 0; row < 12; ++row) code += expRow(2*row, row & 1);
+      code += "li s1, 5\n\t3:\n\t";
+      for (int row = 0; row < 4; ++row)
+        code += "vle32.v v0, (t6)\n\t" + expRow(0, row & 1);
+      code += "addi s1, s1, -1\n\tbnez s1, 3b\n\tvfadd.vv v26, v26, v24\n\t";
+      if (!op.firstBlock())
+        code += "vle32.v v0, (t3)\n\tvfmacc.vv v26, v0, v28\n\t";
+      code += "vse32.v v26, (t3)\n\tsub t4, t4, t5\n\tslli t6, t5, 2\n\t"
+              "add t0, t0, t6\n\tadd t1, t1, t6\n\tadd t2, t2, t6\n\tadd t3, t3, t6\n\t"
+              "bnez t4, 1b\n\t5:\n\tcsrr t6, fcsr\n\t";
+    } else {
+    code =
+        "mv t0, $0\n\tmv t1, $1\n\tmv t2, $2\n\tmv t3, $3\n\tmv t4, $4\n\t"
+        "beqz t4, 5f\n\tbeqz $5, 5f\n\t"
+        "li t6, 0x3e000000\n\tfmv.w.x ft0, t6\n\t"
+        "li t6, 0x4b38aa3b\n\tfmv.w.x ft1, t6\n\t"
+        "li t6, 0x4e7de250\n\tfmv.w.x ft2, t6\n\t"
+        "li t6, 0xc2ae0000\n\tfmv.w.x ft3, t6\n\t"
+        "fmv.w.x ft4, zero\n\t"
+        "li t6, -8388609\n\tfmv.w.x ft5, t6\n\t"
+        "1:\n\tvsetvli t5, t4, e32, m2, ta, ma\n\t"
+        "li t6, -8388609\n\tfmv.w.x ft5, t6\n\tvfmv.v.f v10, ft5\n\tmv t6, t0\n\t";
+    code += fullKeys ? "li s1, 8\n\t" : "mv s1, $5\n\t";
+    code += "2:\n\t";
+    for (int row = 0; row < (fullKeys ? 4 : 1); ++row)
+      code += "vle32.v v8, (t6)\n\tvfmax.vv v10, v10, v8\n\taddi t6, t6, 256\n\t";
+    code += "addi s1, s1, -1\n\tbnez s1, 2b\n\t"
+            "vfmul.vf v10, v10, ft0\n\t";
+    if (!op.firstBlock()) {
+      code += "vle32.v v12, (t1)\n\tvfmax.vv v10, v12, v10\n\t"
+              "vfsub.vv v16, v12, v10\n\t"
+              "vfmax.vf v16, v16, ft3\n\tvfmin.vf v16, v16, ft4\n\t"
+              "vfmul.vf v16, v16, ft1\n\tvfadd.vf v16, v16, ft2\n\t"
+              "vfcvt.rtz.xu.f.v v16, v16\n\tvse32.v v16, (t2)\n\t";
+    }
+    code += "vse32.v v10, (t1)\n\tvmv.v.i v12, 0\n\t"
+            "fmul.s ft5, ft0, ft1\n\tvfmv.v.f v14, ft2\n\t"
+            "vfnmsac.vf v14, ft1, v10\n\tmv t6, t0\n\t";
+    code += fullKeys ? "li s1, 8\n\t" : "mv s1, $5\n\t";
+    code += "3:\n\t";
+    for (int row = 0; row < (fullKeys ? 4 : 1); ++row) {
+      code += "vle32.v v8, (t6)\n\tvfmadd.vf v8, ft5, v14\n\t"
+              "vfcvt.rtz.xu.f.v v8, v8\n\tvse32.v v8, (t6)\n\t"
+              "vfadd.vv v12, v12, v8\n\taddi t6, t6, 256\n\t";
+    }
+    code += "addi s1, s1, -1\n\tbnez s1, 3b\n\t";
+    if (!op.firstBlock())
+      code += "vle32.v v18, (t3)\n\tvfmacc.vv v12, v18, v16\n\t";
+
+    code += "vse32.v v12, (t3)\n\tsub t4, t4, t5\n\tslli t6, t5, 2\n\t"
+            "add t0, t0, t6\n\tadd t1, t1, t6\n\tadd t2, t2, t6\n\tadd t3, t3, t6\n\t"
+            "bnez t4, 1b\n\t5:\n\tcsrr t6, fcsr\n\t";
+    }
+    if (op.qkDim() != 64) {
+      const std::string oldScale = "0x3e000000", newScale = op.qkDim() == 128 ? "0x3db504f3" : "0x3d800000";
+      size_t pos = code.find(oldScale);
+      assert(pos != std::string::npos && "missing fused-attention scale");
+      code.replace(pos, oldScale.size(), newScale);
+    }
+    OperationState state(loc, LLVM::InlineAsmOp::getOperationName());
+    state.addOperands(SmallVector<Value,6>{scorePtr, maxPtr, alphaPtr, denPtr, queries, keys});
+    state.addAttribute("asm_string", ib.getStringAttr(code));
+    std::string constraints =
+        "r,r,r,r,r,r,~{t0},~{t1},~{t2},~{t3},~{t4},~{t5},~{t6},~{s1},"
+        "~{f0},~{f1},~{f2},~{f3},~{f4},~{f5},";
+    if (fullKeys) {
+      for (int reg = 0; reg < 32; ++reg) constraints += "~{v" + std::to_string(reg) + "},";
+    } else {
+      for (int reg = 8; reg < 20; ++reg) constraints += "~{v" + std::to_string(reg) + "},";
+    }
+    constraints += "~{vl},~{vtype},~{memory}";
+    state.addAttribute("constraints", ib.getStringAttr(constraints));
+    state.addAttribute("has_side_effects", ib.getUnitAttr());
+    ib.create(state);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct MatrixUpdateLowering : public OpRewritePattern<spatz::MatrixUpdateOp> {
+  using OpRewritePattern<spatz::MatrixUpdateOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(spatz::MatrixUpdateOp op, PatternRewriter &rewriter) const override {
+    OpBuilder &ib = rewriter;
+    Location loc = op.getLoc();
+    ModuleOp module = op->getParentOfType<ModuleOp>();
+    Value ap = getSpatzF32Address(ib, loc, module, op.accMatrix()), dp = getSpatzF32Address(ib, loc, module, op.source()), xp = getSpatzF32Address(ib, loc, module, op.scaleVec());
+    Value rows32 = ib.create<arith::IndexCastOp>(loc, ib.getI32Type(), op.rows());
+
+    auto emit = [&](OpBuilder &ab, bool fullTile) {
+      std::string code =
+          "mv t0, $0\n\tmv t1, $1\n\tmv t2, $2\n\t"
+          "mv t3, $3\n\tbeqz t3, 5f\n\tli t4, 64\n\t"
+          "vsetvli t5, t4, e32, m2, ta, ma\n\t"
+          "bne t5, t4, 2f\n\t";
+      auto data = [&]() -> std::string {
+        std::string c = op.fromSource() ? "vle32.v v8, (t1)\n\t" : "vle32.v v8, (t0)\n\t";
+        if (op.add()) c += "vle32.v v10, (t0)\n\tvfadd.vv v8, v10, v8\n\t";
+
+        if (op.rescale()) c += "vfmul.vf v8, v8, ft0\n\t";
+        c += "vse32.v v8, (t0)\n\t";
+        return c;
+      };
+      if (fullTile) code += "li t3, 16\n\t";
+      code += "1:\n\t";
+      for (int row = 0; row < (fullTile ? 4 : 1); ++row) {
+        if (op.rescale()) code += "flw ft0, " + std::to_string(fullTile ? 4*row : 0) + "(t2)\n\t";
+        code += data();
+        code += "addi t0, t0, 256\n\t";
+        if (op.fromSource()) code += "addi t1, t1, 256\n\t";
+        if (op.rescale() && !fullTile) code += "addi t2, t2, 4\n\t";
+      }
+      if (op.rescale() && fullTile) code += "addi t2, t2, 16\n\t";
+      code += "addi t3, t3, -1\n\tbnez t3, 1b\n\tj 5f\n\t";
+
+      code += "2:\n\t";
+      if (op.rescale()) code += "flw ft0, 0(t2)\n\t";
+      code += "li t4, 64\n\t3:\n\tvsetvli t5, t4, e32, m2, ta, ma\n\t";
+      code += data();
+      code += "slli t6, t5, 2\n\tadd t0, t0, t6\n\t";
+      if (op.fromSource()) code += "add t1, t1, t6\n\t";
+      code += "sub t4, t4, t5\n\tbnez t4, 3b\n\t";
+      if (op.rescale()) code += "addi t2, t2, 4\n\t";
+      code += "addi t3, t3, -1\n\tbnez t3, 2b\n\t5:\n\tcsrr t5, fcsr\n\t";
+      OperationState state(loc, LLVM::InlineAsmOp::getOperationName());
+      state.addOperands(SmallVector<Value,4>{ap, dp, xp, rows32});
+      state.addAttribute("asm_string", ab.getStringAttr(code));
+      state.addAttribute("constraints", ab.getStringAttr(
+          "r,r,r,r,~{t0},~{t1},~{t2},~{t3},~{t4},~{t5},~{t6},"
+          "~{f0},~{v8},~{v9},~{v10},~{v11},~{vl},~{vtype},~{memory}"));
+      state.addAttribute("has_side_effects", ab.getUnitAttr());
+      ab.create(state);
+    };
+    Value full = ib.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq, rows32, ib.create<arith::ConstantIntOp>(loc, 64, 32));
+    ib.create<scf::IfOp>(loc, full,
+      [&](OpBuilder &fb, Location fl) { emit(fb, true); fb.create<scf::YieldOp>(fl); },
+      [&](OpBuilder &tb, Location tl) { emit(tb, false); tb.create<scf::YieldOp>(tl); });
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct VectorReciprocalApproxLowering : public OpRewritePattern<spatz::VectorReciprocalApproxOp> {
+  using OpRewritePattern<spatz::VectorReciprocalApproxOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(spatz::VectorReciprocalApproxOp op, PatternRewriter &rewriter) const override {
+    OpBuilder &ib = rewriter;
+    Location loc = op.getLoc();
+    ModuleOp module = op->getParentOfType<ModuleOp>();
+    Value srcPtr = getSpatzF32Address(ib, loc, module, op.input()), dstPtr = getSpatzF32Address(ib, loc, module, op.output());
+    Value queries = ib.create<arith::IndexCastOp>(loc, ib.getI32Type(), op.len());
+    std::string code =
+        "mv t0, $0\n\tmv t1, $1\n\tmv t2, $2\n\tbeqz t2, 5f\n\t"
+        "li t5, 0x7ef311c3\n\tli t6, 0x40000000\n\tfmv.w.x ft0, t6\n\t"
+        "1:\n\tvsetvli t3, t2, e32, m2, ta, ma\n\t"
+        "vle32.v v8, (t0)\n\tvmv.v.x v12, t5\n\t"
+        "vsub.vv v10, v12, v8\n\tvfmv.v.f v14, ft0\n\t";
+
+    for (int iteration = 0; iteration < 3; ++iteration) {
+      code += "vfmul.vv v16, v8, v10\n\t"
+              "vfsub.vv v16, v14, v16\n\t"
+              "vfmul.vv v10, v10, v16\n\t";
+    }
+    code += "vse32.v v10, (t1)\n\tsub t2, t2, t3\n\t"
+            "slli t4, t3, 2\n\tadd t0, t0, t4\n\tadd t1, t1, t4\n\t"
+            "bnez t2, 1b\n\t5:\n\tcsrr t5, fcsr\n\t";
+    OperationState state(loc, LLVM::InlineAsmOp::getOperationName());
+    state.addOperands(SmallVector<Value,3>{srcPtr, dstPtr, queries});
+    state.addAttribute("asm_string", ib.getStringAttr(code));
+    state.addAttribute("constraints", ib.getStringAttr(
+        "r,r,r,~{t0},~{t1},~{t2},~{t3},~{t4},~{t5},~{t6},~{f0},"
+        "~{v8},~{v9},~{v10},~{v11},~{v12},~{v13},~{v14},~{v15},"
+        "~{v16},~{v17},~{vl},~{vtype},~{memory}"));
+    state.addAttribute("has_side_effects", ib.getUnitAttr());
+    ib.create(state);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
 
 struct LowerSpatzMatrixAddPass : public LowerSpatzMatrixAddBase<LowerSpatzMatrixAddPass> {
   LowerSpatzMatrixAddPass() = default;
 
+  void getDependentDialects(DialectRegistry &registry) const override {
+    LowerSpatzMatrixAddBase<LowerSpatzMatrixAddPass>::getDependentDialects(registry);
+    registry.insert<LLVM::LLVMDialect>();
+  }
+
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
     RewritePatternSet patterns(&getContext());
-    patterns.add<LinalgLayerNormFusionPattern, LayerNormLowering, MatrixAddLowering, MatrixVectorAddLowering, MatrixScalarMulLowering, MatrixSubLowering,
+    patterns.add<AttentionSoftmaxUpdateLowering, MatrixUpdateLowering, VectorReciprocalApproxLowering, LinalgLayerNormFusionPattern, LayerNormLowering, MatrixAddLowering, MatrixVectorAddLowering, MatrixScalarMulLowering, MatrixSubLowering,
     MatrixExpReduceLowering, MatrixColumnMaxLowering, VectorMaxUpdateLowering, VectorExpLowering, VectorAddLowering,
     VectorMulLowering, MatrixRowScaleLowering, MatrixRowDivLowering>(&getContext());
-    
+
     if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns)))) signalPassFailure();
   }
 };
 
-} // namespace
+}
 
 namespace mlir {
 std::unique_ptr<Pass> createLowerSpatzMatrixAddPass() {
   return std::make_unique<LowerSpatzMatrixAddPass>();
 }
-} // namespace mlir
+}

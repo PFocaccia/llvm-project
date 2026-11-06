@@ -9,7 +9,9 @@
 #include "mlir/Dialect/Spatz/SpatzDialect.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpImplementation.h"
-#include "mlir/IR/Builders.h"             
+#include "mlir/IR/Matchers.h"
+#include <cstdint>
+#include "mlir/IR/Builders.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 
 using namespace mlir;
@@ -19,7 +21,7 @@ using namespace mlir;
 #define GET_OP_CLASSES
 #include "mlir/Dialect/Spatz/Spatz.cpp.inc"
 
-void spatz::SpatzDialect::initialize() { 
+void spatz::SpatzDialect::initialize() {
 addOperations<
 #define GET_OP_LIST
 #include "mlir/Dialect/Spatz/Spatz.cpp.inc"
@@ -27,9 +29,9 @@ addOperations<
 }
 
 static LogicalResult verifyIntegerVectorElemType(Type elemType, Operation *op, StringRef opName) {
-  
+
   auto intType = elemType.dyn_cast<IntegerType>();
-  
+
   if (!intType || !intType.isSignless()) return op->emitOpError(opName) << " requires signless integer vectors";
 
   unsigned width = intType.getWidth();
@@ -39,14 +41,14 @@ static LogicalResult verifyIntegerVectorElemType(Type elemType, Operation *op, S
 }
 
 static LogicalResult verifyFloatVectorElemType(Type elemType, Operation *op, StringRef opName) {
-  
+
   if (!(elemType.isF16() || elemType.isF32() || elemType.isBF16())) return op->emitOpError(opName) << " supports only f16/f32/bf16 element types";
 
   return success();
 }
 
 static LogicalResult verifySupportedVectorElemType(Type elemType, Operation *op, StringRef opName) {
-  
+
   if (elemType.isa<IntegerType>()) return verifyIntegerVectorElemType(elemType, op, opName);
   if (elemType.isa<FloatType>()) return verifyFloatVectorElemType(elemType, op, opName);
 
@@ -54,7 +56,7 @@ static LogicalResult verifySupportedVectorElemType(Type elemType, Operation *op,
 }
 
 static LogicalResult verifyMemRefIndices(Operation *op, MemRefType memrefType, ValueRange indices, StringRef opName) {
-  
+
   if ((int64_t)indices.size() != memrefType.getRank()) return op->emitOpError(opName) << " incorrect number of indices for memref";
   return success();
 
@@ -62,7 +64,7 @@ static LogicalResult verifyMemRefIndices(Operation *op, MemRefType memrefType, V
 
 LogicalResult spatz::VAddVVOp::verify() {
   auto vecTy = getResult().getType().dyn_cast<VectorType>();
-  
+
   if (!vecTy) return emitOpError("requires vector result type");
 
   return verifyIntegerVectorElemType(vecTy.getElementType(), *this, "vadd_vv");
@@ -70,14 +72,14 @@ LogicalResult spatz::VAddVVOp::verify() {
 
 LogicalResult spatz::VFAddVVOp::verify() {
   auto vecTy = getResult().getType().dyn_cast<VectorType>();
-  
+
   if (!vecTy) return emitOpError("requires vector result type");
 
   return verifyFloatVectorElemType(vecTy.getElementType(), *this, "vfadd_vv");
 }
 
 LogicalResult spatz::VLEOp::verify() {
-  
+
   if (base().getType().isa<LLVM::LLVMPointerType>()) {
     if (!indices().empty())
       return emitOpError("indices must be empty for LLVM pointer base");
@@ -85,11 +87,11 @@ LogicalResult spatz::VLEOp::verify() {
   }
 
   auto memrefType = base().getType().dyn_cast<MemRefType>();
-  
+
   if (!memrefType) return emitOpError("requires memref or LLVM pointer base operand");
 
   auto vecTy = getResult().getType().dyn_cast<VectorType>();
-  
+
   if (!vecTy || vecTy.getRank() != 1) return emitOpError("requires 1-D vector result type");
 
   if (failed(verifyMemRefIndices(*this, memrefType, indices(), "vle"))) return failure();
@@ -109,11 +111,11 @@ LogicalResult spatz::VSEOp::verify() {
   }
 
   auto memrefType = base().getType().dyn_cast<MemRefType>();
-  
+
   if (!memrefType) return emitOpError("requires memref or LLVM pointer base operand");
 
   auto vecTy = value().getType().dyn_cast<VectorType>();
-  
+
   if (!vecTy || vecTy.getRank() != 1) return emitOpError("requires 1-D vector value type");
 
   if (failed(verifyMemRefIndices(*this, memrefType, indices(), "vse"))) return failure();
@@ -152,10 +154,10 @@ LogicalResult spatz::VFMulVFOp::verify() {
 }
 
 LogicalResult spatz::MatrixAddOp::verify() {
-  
+
   auto accType = accMatrix().getType().dyn_cast<MemRefType>();
   auto tmpType = tmpMatrix().getType().dyn_cast<MemRefType>();
-  
+
   if (!accType || !tmpType) return emitOpError("requires memref operands");
 
   if (accType.getRank() != 2 || tmpType.getRank() != 2) return emitOpError("requires rank-2 memrefs");
@@ -163,7 +165,7 @@ LogicalResult spatz::MatrixAddOp::verify() {
   if (accType.getElementType() != tmpType.getElementType()) return emitOpError("requires matching element types");
 
   auto vecLenAttr = (*this)->getAttrOfType<IntegerAttr>("vecLen");
-  
+
   if (!vecLenAttr || vecLenAttr.getInt() <= 0) return emitOpError("requires positive 'vecLen' attribute");
 
   return success();
@@ -172,11 +174,11 @@ LogicalResult spatz::MatrixAddOp::verify() {
 LogicalResult spatz::MatrixVectorAddOp::verify() {
   auto accType = accMatrix().getType().dyn_cast<MemRefType>();
   auto vecType = addVector().getType().dyn_cast<MemRefType>();
-  
+
   if (!accType || !vecType) return emitOpError("requires memref operands");
   if (accType.getRank() != 2) return emitOpError("requires rank-2 memref for matrix");
   if (vecType.getRank() != 1) return emitOpError("requires rank-1 memref for vector");
-  if (accType.getElementType() != vecType.getElementType()) 
+  if (accType.getElementType() != vecType.getElementType())
     return emitOpError("requires matching element types between matrix and vector");
 
   auto vecLenAttr = (*this)->getAttrOfType<IntegerAttr>("vecLen");
@@ -191,7 +193,7 @@ LogicalResult spatz::MatrixScalarMulOp::verify() {
   if (accType.getRank() != 2) return emitOpError("requires rank-2 memref for matrix");
 
   Type scalarTy = scalar().getType();
-  if (accType.getElementType() != scalarTy) 
+  if (accType.getElementType() != scalarTy)
     return emitOpError("scalar type must match matrix element type");
 
   auto vecLenAttr = (*this)->getAttrOfType<IntegerAttr>("vecLen");
@@ -249,5 +251,67 @@ LogicalResult spatz::LayerNormOp::verify() {
   if (maxHidden() <= 0)
     return emitOpError("maxHidden must be positive");
 
+  return success();
+}
+
+static LogicalResult verifySpatzF32Buffer(Operation *op, Value buffer, unsigned rank,
+                                        int64_t minRows, int64_t minCols = 0) {
+  auto type = buffer.getType().dyn_cast<MemRefType>();
+  if (!type || type.getRank() != rank || !type.getElementType().isF32())
+    return op->emitOpError("requires rank-") << rank << " FP32 memrefs";
+  SmallVector<int64_t> strides;
+  int64_t offset;
+  if (failed(getStridesAndOffset(type, strides, offset)) || strides.back() != 1 ||
+      (rank == 2 && strides[0] != 64))
+    return op->emitOpError("requires contiguous vectors and 64-element matrix row pitch");
+  if ((!type.isDynamicDim(0) && type.getDimSize(0) < minRows) ||
+      (rank == 2 && !type.isDynamicDim(1) && type.getDimSize(1) < minCols))
+    return op->emitOpError("buffer shape is smaller than its active extents");
+  return success();
+}
+
+static LogicalResult verifySpatzExtent(Operation *op, Value extent, int64_t limit,
+                                      int64_t &known) {
+  APInt value;
+  known = 0;
+  if (!matchPattern(extent, m_ConstantInt(&value))) return success();
+  if (value.isNegative() || value.getLimitedValue() > static_cast<uint64_t>(limit))
+    return op->emitOpError("active extent must be between zero and ") << limit;
+  known = value.getSExtValue();
+  return success();
+}
+
+LogicalResult spatz::AttentionSoftmaxUpdateOp::verify() {
+  if (keyRows() < 1 || keyRows() > 32)
+    return emitOpError("requires keyRows in [1,32]");
+  if (qkDim() != 64 && qkDim() != 128 && qkDim() != 256)
+    return emitOpError("requires qkDim equal to 64, 128 or 256");
+  int64_t active;
+  if (failed(verifySpatzExtent(*this, rows(), 64, active)) ||
+      failed(verifySpatzF32Buffer(*this, scores(), 2, keyRows(), active)) ||
+      failed(verifySpatzF32Buffer(*this, maxState(), 1, active)) ||
+      failed(verifySpatzF32Buffer(*this, alpha(), 1, active)) ||
+      failed(verifySpatzF32Buffer(*this, denom(), 1, active)))
+    return failure();
+  return success();
+}
+
+LogicalResult spatz::MatrixUpdateOp::verify() {
+  int64_t active;
+  if (failed(verifySpatzExtent(*this, rows(), 64, active)) ||
+      failed(verifySpatzF32Buffer(*this, accMatrix(), 2, active, 64)) ||
+      failed(verifySpatzF32Buffer(*this, source(), 2, fromSource() ? active : 0,
+                                fromSource() ? 64 : 0)) ||
+      failed(verifySpatzF32Buffer(*this, scaleVec(), 1, rescale() ? active : 0)))
+    return failure();
+  return success();
+}
+
+LogicalResult spatz::VectorReciprocalApproxOp::verify() {
+  int64_t active;
+  if (failed(verifySpatzExtent(*this, len(), INT32_MAX, active)) ||
+      failed(verifySpatzF32Buffer(*this, input(), 1, active)) ||
+      failed(verifySpatzF32Buffer(*this, output(), 1, active)))
+    return failure();
   return success();
 }

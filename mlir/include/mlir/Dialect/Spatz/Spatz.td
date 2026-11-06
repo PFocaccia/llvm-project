@@ -65,6 +65,25 @@ def VLEOp : Spatz_Op<"vle"> {
   let hasVerifier = 1;
 }
 
+// Strided vector load: reads VL elements using a byte stride.
+// Keep the pointer as a memref until SpatzToLLVM materializes the LLVM address.
+def VLSEOp : Spatz_Op<"vlse"> {
+  let summary = "Spatz strided vector load (vlse*.v) without masks";
+  let arguments = (ins AnyType:$base, Variadic<Index>:$indices,
+                       AnySignlessInteger:$stride, AnySignlessIntegerOrIndex:$vl);
+  let results = (outs VectorOf<[AnyType]>:$res);
+  let assemblyFormat = "$base `[` $indices `]` `,` $stride `,` $vl attr-dict `:` type($base) `,` type($res) `,` type($stride) `,` type($vl)";
+}
+
+// Strided vector store; stride is expressed in BYTES, not elements.
+def VSSEOp : Spatz_Op<"vsse"> {
+  let summary = "Spatz strided vector store (vsse*.v) without masks";
+  let arguments = (ins VectorOf<[AnyType]>:$value, AnyType:$base,
+                       Variadic<Index>:$indices, AnySignlessInteger:$stride,
+                       AnySignlessIntegerOrIndex:$vl);
+  let assemblyFormat = "$value `,` $base `[` $indices `]` `,` $stride `,` $vl attr-dict `:` type($value) `,` type($base) `,` type($stride) `,` type($vl)";
+}
+
 def VSEOp : Spatz_Op<"vse"> {
   let summary = "Spatz vector store (vse*.v) without masks";
   // Cambiato AnyMemRef in AnyType per supportare !llvm.ptr
@@ -190,6 +209,21 @@ def VFCvtRtzXUFVOp : Spatz_Op<"vfcvt_rtz_xu_f_v"> {
   let assemblyFormat = "$passthru `,` $src `,` $vl attr-dict `:` type($passthru) `,` type($src) `,` type($vl) `,` type($res)";
 }
 
+// Narrow FP32 accumulator lanes to FP16 for NCHW output storage.
+// Dest SEW=16, source EEW=32; same lane count, different register groups.
+// Lowering validates element widths and lane count before emitting LLVM.
+def VFNcvtFFWOp : Spatz_Op<"vfncvt_f_f_w",
+    [AllTypesMatch<["passthru", "res"]>]> {
+  let summary = "Spatz floating-point narrowing conversion FP32 to FP16";
+  let arguments = (ins
+    VectorOf<[F16]>:$passthru,
+    VectorOf<[F32]>:$src,
+    AnySignlessIntegerOrIndex:$vl
+  );
+  let results = (outs VectorOf<[F16]>:$res);
+  let assemblyFormat = "$passthru `,` $src `,` $vl attr-dict `:` type($passthru) `,` type($src) `,` type($vl)";
+}
+
 // Maps to llvm.riscv.vfcvt.rtz.x.f.v (unmasked form)
 def VFCvtRtzXFVOp : Spatz_Op<"vfcvt_rtz_x_f_v"> {
   let summary =
@@ -255,8 +289,8 @@ def VBitcastOp : Spatz_Op<"vbitcast"> {
 def MatrixAddOp : Spatz_Op<"matrix_add"> {
   let summary = "Add two matrices in TCDM using Spatz";
   let arguments = (ins AnyMemRef:$accMatrix, AnyMemRef:$tmpMatrix,
-                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
-                       I32Attr:$dataType); 
+                       Index:$rows, Index:$cols, I64Attr:$vecLen,
+                       I32Attr:$dataType);
   let assemblyFormat = "$accMatrix `,` $tmpMatrix `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($tmpMatrix) `,` type($rows) `,` type($cols)";
   let hasVerifier = 1;
 }
@@ -264,7 +298,7 @@ def MatrixAddOp : Spatz_Op<"matrix_add"> {
 def MatrixVectorAddOp : Spatz_Op<"matrix_vector_add"> {
   let summary = "Add a 1D vector to all rows of a 2D matrix in TCDM using Spatz";
   let arguments = (ins AnyMemRef:$accMatrix, AnyMemRef:$addVector,
-                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
+                       Index:$rows, Index:$cols, I64Attr:$vecLen,
                        I32Attr:$dataType);
   let assemblyFormat = "$accMatrix `,` $addVector `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($addVector) `,` type($rows) `,` type($cols)";
   let hasVerifier = 1;
@@ -273,7 +307,7 @@ def MatrixVectorAddOp : Spatz_Op<"matrix_vector_add"> {
 def MatrixScalarMulOp : Spatz_Op<"matrix_scalar_mul"> {
   let summary = "Multiply a 2D matrix by a scalar in TCDM using Spatz";
   let arguments = (ins AnyMemRef:$accMatrix, AnyType:$scalar,
-                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
+                       Index:$rows, Index:$cols, I64Attr:$vecLen,
                        I32Attr:$dataType);
   let assemblyFormat = "$accMatrix `,` $scalar `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($scalar) `,` type($rows) `,` type($cols)";
   let hasVerifier = 1;
@@ -282,8 +316,8 @@ def MatrixScalarMulOp : Spatz_Op<"matrix_scalar_mul"> {
 def MatrixSubOp : Spatz_Op<"matrix_sub"> {
   let summary = "Subtract two matrices in TCDM using Spatz";
   let arguments = (ins AnyMemRef:$accMatrix, AnyMemRef:$tmpMatrix,
-                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
-                       I32Attr:$dataType); 
+                       Index:$rows, Index:$cols, I64Attr:$vecLen,
+                       I32Attr:$dataType);
   let assemblyFormat = "$accMatrix `,` $tmpMatrix `,` $rows `,` $cols attr-dict `:` type($accMatrix) `,` type($tmpMatrix) `,` type($rows) `,` type($cols)";
 }
 
@@ -301,14 +335,14 @@ def MatrixExpReduceOp : Spatz_Op<"matrix_exp_reduce"> {
     I64Attr:$vecLen,
     I32Attr:$dataType
   );
-  
+
   let assemblyFormat = "$s_buf `,` $p_T `,` $m_val `,` $sum_arr (`,` $bias^)? `,` $nE `,` $mE attr-dict `:` type($s_buf) `,` type($p_T) `,` type($m_val) `,` type($sum_arr) (`,` type($bias)^)? `,` type($nE) `,` type($mE)";
 }
 
 def MatrixColumnMaxOp : Spatz_Op<"matrix_column_max"> {
   let summary = "Find the maximum of each column in a 2D matrix using Spatz";
   let arguments = (ins AnyMemRef:$matrix, AnyMemRef:$maxVector,
-                       Index:$rows, Index:$cols, I64Attr:$vecLen, 
+                       Index:$rows, Index:$cols, I64Attr:$vecLen,
                        I32Attr:$dataType);
   let assemblyFormat = "$matrix `,` $maxVector `,` $rows `,` $cols attr-dict `:` type($matrix) `,` type($maxVector) `,` type($rows) `,` type($cols)";
 }
@@ -316,10 +350,10 @@ def MatrixColumnMaxOp : Spatz_Op<"matrix_column_max"> {
 def VectorMaxUpdateOp : Spatz_Op<"vector_max_update"> {
   let summary = "Update a vector with element-wise maximum and output the difference from the old values";
   let arguments = (ins
-    AnyMemRef:$vec_prev,   
-    AnyMemRef:$vec_new,    
-    AnyMemRef:$vec_diff,   
-    Index:$len,            
+    AnyMemRef:$vec_prev,
+    AnyMemRef:$vec_new,
+    AnyMemRef:$vec_diff,
+    Index:$len,
     I64Attr:$vecLen,
     I32Attr:$dataType
   );
@@ -329,9 +363,9 @@ def VectorMaxUpdateOp : Spatz_Op<"vector_max_update"> {
 def VectorExpOp : Spatz_Op<"vector_exp"> {
   let summary = "Apply fast Schraudolph exp to a 1D vector";
   let arguments = (ins
-    AnyMemRef:$vec_in,    
-    AnyMemRef:$vec_out,   
-    Index:$len,           
+    AnyMemRef:$vec_in,
+    AnyMemRef:$vec_out,
+    Index:$len,
     I64Attr:$vecLen,
     I32Attr:$dataType
   );
@@ -341,8 +375,8 @@ def VectorExpOp : Spatz_Op<"vector_exp"> {
 def VectorAddOp : Spatz_Op<"vector_add"> {
   let summary = "Element-wise addition of two 1D vectors (in-place on vec_a)";
   let arguments = (ins
-    AnyMemRef:$vec_a,      
-    AnyMemRef:$vec_b,      
+    AnyMemRef:$vec_a,
+    AnyMemRef:$vec_b,
     Index:$len,
     I64Attr:$vecLen,
     I32Attr:$dataType
@@ -353,8 +387,8 @@ def VectorAddOp : Spatz_Op<"vector_add"> {
 def VectorMulOp : Spatz_Op<"vector_mul"> {
   let summary = "Element-wise multiplication of two 1D vectors (in-place on vec_a)";
   let arguments = (ins
-    AnyMemRef:$vec_a,      
-    AnyMemRef:$vec_b,      
+    AnyMemRef:$vec_a,
+    AnyMemRef:$vec_b,
     Index:$len,
     I64Attr:$vecLen,
     I32Attr:$dataType
@@ -365,10 +399,10 @@ def VectorMulOp : Spatz_Op<"vector_mul"> {
 def MatrixRowScaleOp : Spatz_Op<"matrix_row_scale"> {
   let summary = "Multiply each row of a matrix by the corresponding element in a 1D scale vector";
   let arguments = (ins
-    AnyMemRef:$matrix,     
-    AnyMemRef:$scaleVec,   
-    Index:$rows,           
-    Index:$cols,           
+    AnyMemRef:$matrix,
+    AnyMemRef:$scaleVec,
+    Index:$rows,
+    Index:$cols,
     I64Attr:$vecLen,
     I32Attr:$dataType
   );
@@ -378,10 +412,10 @@ def MatrixRowScaleOp : Spatz_Op<"matrix_row_scale"> {
 def MatrixRowDivOp : Spatz_Op<"matrix_row_div"> {
   let summary = "Divide each row of a matrix by the corresponding element in a 1D divisor vector";
   let arguments = (ins
-    AnyMemRef:$matrix,     
-    AnyMemRef:$divVec,     
-    Index:$rows,           
-    Index:$cols,           
+    AnyMemRef:$matrix,
+    AnyMemRef:$divVec,
+    Index:$rows,
+    Index:$cols,
     I64Attr:$vecLen,
     I32Attr:$dataType
   );
@@ -403,6 +437,54 @@ def LayerNormOp : Spatz_Op<"layer_norm"> {
 
   let assemblyFormat = [{$input `,` $gamma `,` $beta `,` $output attr-dict `:` type($input) `,` type($gamma) `,` type($beta) `,` type($output) }];
 
+  let hasVerifier = 1;
+}
+
+def AttentionSoftmaxUpdateOp : Spatz_Op<"attention_softmax_update"> {
+  let summary = "Fused FP32 online softmax update for a transposed attention tile";
+  let description = [{
+    Replaces active scores[key, query] in place with approximate exponentials
+    of scaled scores relative to the updated per-query maximum. Updates maxState
+    and denom and, after the first block, writes alpha for accumulator rescaling.
+    The first block reads neither previous state nor alpha and does not write alpha.
+    Requires finite scores, 64-element matrix row pitch, contiguous state vectors,
+    and 0 <= rows <= 64. keyRows is in [1,32]; qkDim is 64, 128 or 256.
+    Uses the existing bit-linear exponential approximation and FP32 operation order.
+  }];
+  let arguments = (ins AnyMemRef:$scores, AnyMemRef:$maxState,
+                       AnyMemRef:$alpha, AnyMemRef:$denom, Index:$rows,
+                       I64Attr:$keyRows, I64Attr:$qkDim, BoolAttr:$firstBlock);
+  let assemblyFormat = "$scores `,` $maxState `,` $alpha `,` $denom `,` $rows attr-dict `:` type($scores) `,` type($maxState) `,` type($alpha) `,` type($denom) `,` type($rows)";
+  let hasVerifier = 1;
+}
+
+def MatrixUpdateOp : Spatz_Op<"matrix_update"> {
+  let summary = "Fused FP32 matrix copy, accumulation and per-row scaling";
+  let description = [{
+    Starts with source if fromSource, otherwise accMatrix; optionally adds the
+    old accMatrix and then optionally multiplies by scaleVec[row]. Stores into
+    accMatrix. Addition and multiplication have separate FP32 rounding.
+    Matrices have 64 active columns and a 64-element row pitch; scaleVec is
+    contiguous. Requires 0 <= rows <= 64. Unused inputs are not read.
+  }];
+  let arguments = (ins AnyMemRef:$accMatrix, AnyMemRef:$source,
+                       AnyMemRef:$scaleVec, Index:$rows, BoolAttr:$fromSource,
+                       BoolAttr:$add, BoolAttr:$rescale);
+  let assemblyFormat = "$accMatrix `,` $source `,` $scaleVec `,` $rows attr-dict `:` type($accMatrix) `,` type($source) `,` type($scaleVec) `,` type($rows)";
+  let hasVerifier = 1;
+}
+
+def VectorReciprocalApproxOp : Spatz_Op<"vector_reciprocal_approx"> {
+  let summary = "Approximate FP32 reciprocal using three Newton iterations";
+  let description = [{
+    Writes approximate 1/input for len elements of contiguous FP32 vectors.
+    Requires positive normal finite inputs whose reciprocal is representable
+    as a normal FP32 value, and a nonnegative len representable in i32.
+    Uses the bit seed 0x7ef311c3 followed by three separately rounded Newton
+    updates; it does not implement general IEEE division semantics.
+  }];
+  let arguments = (ins AnyMemRef:$input, AnyMemRef:$output, Index:$len);
+  let assemblyFormat = "$input `,` $output `,` $len attr-dict `:` type($input) `,` type($output) `,` type($len)";
   let hasVerifier = 1;
 }
 
